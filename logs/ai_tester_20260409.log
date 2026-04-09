@@ -138,3 +138,119 @@ wait...
 2026-04-09 17:51:58,068 - INFO - [asserter.py:49] - 智能断言正在思考中...
 2026-04-09 17:52:01,590 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=250, Completion=48, 总计=298
 2026-04-09 17:52:01,591 - ERROR - [asserter.py:71] - ❌ 断言失败 (FAILED). 理由: The DOM does not contain any elements or text explicitly related to 'OpenAI' or a search results list. The provided elements are generic navigation links.
+2026-04-09 18:02:03,110 - INFO - [agent.py:66] - 🎯 开始执行意图: '在搜索框中输入 'OpenAI''
+2026-04-09 18:02:03,111 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 18:02:03,180 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:06,408 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=337, Completion=21, 总计=358
+2026-04-09 18:02:06,408 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[1], 输入值=OpenAI
+2026-04-09 18:02:08,221 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 18:02:08,261 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:09,823 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=405, Completion=18, 总计=423
+2026-04-09 18:02:09,824 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 18:02:09,824 - INFO - [agent.py:119] - ✅ 意图执行成功: '在搜索框中输入 'OpenAI''
+2026-04-09 18:02:09,825 - INFO - [agent.py:66] - 🎯 开始执行意图: '点击 '百度一下' 按钮'
+2026-04-09 18:02:09,825 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 18:02:09,845 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:11,403 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=390, Completion=18, 总计=408
+2026-04-09 18:02:11,404 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=wait, 目标ID=[null], 输入值=None
+2026-04-09 18:02:13,413 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 18:02:13,433 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:14,600 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=404, Completion=18, 总计=422
+2026-04-09 18:02:14,600 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=click, 目标ID=[1], 输入值=None
+2026-04-09 18:02:16,166 - INFO - [agent.py:71] - --- 步骤 3 ---
+2026-04-09 18:02:16,187 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:17,478 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=420, Completion=14, 总计=434
+2026-04-09 18:02:17,478 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 18:02:17,478 - INFO - [agent.py:119] - ✅ 意图执行成功: '点击 '百度一下' 按钮'
+2026-04-09 18:02:17,501 - INFO - [asserter.py:33] - 🔍 触发智能断言: '页面展示与 'OpenAI' 相关的搜索结果列表'
+2026-04-09 18:02:17,501 - INFO - [asserter.py:49] - 智能断言正在思考中...
+2026-04-09 18:02:20,595 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=250, Completion=53, 总计=303
+2026-04-09 18:02:20,595 - ERROR - [asserter.py:71] - ❌ 断言失败 (FAILED). 理由: The DOM does not contain any elements or text explicitly related to 'OpenAI' or a list of search results. The provided elements are general navigation links unrelated to the assertion.
+2026-04-09 18:02:31,658 - INFO - [agent.py:66] - 🎯 开始执行意图: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 18:02:31,659 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 18:02:31,704 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:35,914 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=662, Completion=25, 总计=687
+2026-04-09 18:02:35,914 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[13], 输入值=student
+2026-04-09 18:02:37,456 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 18:02:37,524 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:39,305 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=676, Completion=26, 总计=702
+2026-04-09 18:02:39,306 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[14], 输入值=Password123
+2026-04-09 18:02:40,832 - INFO - [agent.py:71] - --- 步骤 3 ---
+2026-04-09 18:02:40,862 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:42,434 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=693, Completion=18, 总计=711
+2026-04-09 18:02:42,435 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=click, 目标ID=[15], 输入值=None
+2026-04-09 18:02:45,207 - INFO - [agent.py:71] - --- 步骤 4 ---
+2026-04-09 18:02:45,233 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:02:46,808 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=517, Completion=14, 总计=531
+2026-04-09 18:02:46,808 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 18:02:46,809 - INFO - [agent.py:119] - ✅ 意图执行成功: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 18:02:46,959 - INFO - [asserter.py:33] - 🔍 触发智能断言: 'The user has logged in successfully and a success message is displayed on the page.'
+2026-04-09 18:02:46,959 - INFO - [asserter.py:49] - 智能断言正在思考中...
+2026-04-09 18:03:08,274 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=325, Completion=67, 总计=392
+2026-04-09 18:03:08,275 - INFO - [asserter.py:69] - ✅ 断言通过 (PASSED). 理由: The DOM contains a section and an h1 element with the text 'Logged In Successfully' and a paragraph indicating a success message ('Congratulations student. You successfully logged in'), which confirms the user has logged in successfully and a success message is displayed.
+2026-04-09 18:03:08,914 - INFO - [test_demo.py:48] - === 测试元素自愈机制 ===
+2026-04-09 18:03:15,028 - WARNING - [test_demo.py:67] - ⚠️ 传统脚本执行失败，触发 AI 自愈机制！错误信息: Page.fill: Timeout 2000ms exceeded.
+Call log:
+wait...
+2026-04-09 18:03:15,061 - WARNING - [healer.py:40] - 🚑 触发 AI 元素自愈机制!
+2026-04-09 18:03:15,062 - INFO - [healer.py:41] -    丢失的定位器: '#old-username-input'
+2026-04-09 18:03:15,062 - INFO - [healer.py:42] -    该元素的意图描述: 'The username input field for login'
+2026-04-09 18:03:17,858 - INFO - [healer.py:70] -    ✅ 自愈成功! 找到新的元素 ID: [13]. 原因: The element with id='13' is an input field with name='username', which matches the intent of the original selector as the username input field for login.
+2026-04-09 18:03:17,858 - INFO - [test_demo.py:79] - 🔧 正在使用自愈后的新元素 ID [13] 继续执行操作...
+2026-04-09 18:03:18,389 - INFO - [test_demo.py:84] - 🎉 自愈操作执行成功！测试通过。
+2026-04-09 18:03:40,879 - INFO - [agent.py:66] - 🎯 开始执行意图: '在搜索框中输入 'OpenAI''
+2026-04-09 18:03:40,880 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 18:03:40,934 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:03:43,517 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=337, Completion=21, 总计=358
+2026-04-09 18:03:43,517 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[1], 输入值=OpenAI
+2026-04-09 18:03:45,102 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 18:03:45,138 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:03:47,365 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=405, Completion=18, 总计=423
+2026-04-09 18:03:47,365 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 18:03:47,365 - INFO - [agent.py:119] - ✅ 意图执行成功: '在搜索框中输入 'OpenAI''
+2026-04-09 18:03:47,365 - INFO - [agent.py:66] - 🎯 开始执行意图: '点击 '百度一下' 按钮'
+2026-04-09 18:03:47,365 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 18:03:47,384 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:03:48,705 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=390, Completion=18, 总计=408
+2026-04-09 18:03:48,705 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=click, 目标ID=[1], 输入值=None
+2026-04-09 18:03:50,259 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 18:03:50,278 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:03:51,654 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=404, Completion=18, 总计=422
+2026-04-09 18:03:51,655 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 18:03:51,656 - INFO - [agent.py:119] - ✅ 意图执行成功: '点击 '百度一下' 按钮'
+2026-04-09 18:03:51,676 - INFO - [asserter.py:33] - 🔍 触发智能断言: '页面展示与 'OpenAI' 相关的搜索结果列表'
+2026-04-09 18:03:51,676 - INFO - [asserter.py:49] - 智能断言正在思考中...
+2026-04-09 18:03:55,334 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=250, Completion=50, 总计=300
+2026-04-09 18:03:55,334 - ERROR - [asserter.py:71] - ❌ 断言失败 (FAILED). 理由: The DOM does not contain any elements or text indicating a list of search results related to 'OpenAI'. The provided elements are navigation links unrelated to the assertion.
+2026-04-09 18:04:01,321 - INFO - [agent.py:66] - 🎯 开始执行意图: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 18:04:01,321 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 18:04:01,372 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:04:05,280 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=662, Completion=25, 总计=687
+2026-04-09 18:04:05,280 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[13], 输入值=student
+2026-04-09 18:04:06,895 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 18:04:06,934 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:04:08,582 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=676, Completion=26, 总计=702
+2026-04-09 18:04:08,582 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[14], 输入值=Password123
+2026-04-09 18:04:10,164 - INFO - [agent.py:71] - --- 步骤 3 ---
+2026-04-09 18:04:10,191 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:04:11,631 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=693, Completion=18, 总计=711
+2026-04-09 18:04:11,632 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=click, 目标ID=[15], 输入值=None
+2026-04-09 18:04:25,057 - INFO - [agent.py:71] - --- 步骤 4 ---
+2026-04-09 18:04:25,087 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 18:04:27,844 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=517, Completion=18, 总计=535
+2026-04-09 18:04:27,844 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 18:04:27,845 - INFO - [agent.py:119] - ✅ 意图执行成功: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 18:04:27,919 - INFO - [asserter.py:33] - 🔍 触发智能断言: 'The user has logged in successfully and a success message is displayed on the page.'
+2026-04-09 18:04:27,919 - INFO - [asserter.py:49] - 智能断言正在思考中...
+2026-04-09 18:04:32,144 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=325, Completion=59, 总计=384
+2026-04-09 18:04:32,144 - INFO - [asserter.py:69] - ✅ 断言通过 (PASSED). 理由: The DOM contains a section and an h1 element with the text 'Logged In Successfully' and a paragraph indicating a success message. This confirms the user has logged in successfully and a success message is displayed.
+2026-04-09 18:04:33,048 - INFO - [test_demo.py:48] - === 测试元素自愈机制 ===
+2026-04-09 18:04:39,918 - WARNING - [test_demo.py:67] - ⚠️ 传统脚本执行失败，触发 AI 自愈机制！错误信息: Page.fill: Timeout 2000ms exceeded.
+Call log:
+wait...
+2026-04-09 18:04:40,034 - WARNING - [healer.py:40] - 🚑 触发 AI 元素自愈机制!
+2026-04-09 18:04:40,035 - INFO - [healer.py:41] -    丢失的定位器: '#old-username-input'
+2026-04-09 18:04:40,035 - INFO - [healer.py:42] -    该元素的意图描述: 'The username input field for login'
+2026-04-09 18:04:45,053 - INFO - [healer.py:70] -    ✅ 自愈成功! 找到新的元素 ID: [13]. 原因: The element with id='username' is an input field with name='username', which matches the description of the username input field for login.
+2026-04-09 18:04:45,053 - INFO - [test_demo.py:79] - 🔧 正在使用自愈后的新元素 ID [13] 继续执行操作...
+2026-04-09 18:04:45,581 - INFO - [test_demo.py:84] - 🎉 自愈操作执行成功！测试通过。
