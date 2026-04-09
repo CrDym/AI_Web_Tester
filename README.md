@@ -109,9 +109,10 @@ OPENAI_API_KEY=github_pat_xxxxxx
   pytest tests/test_demo.py -s
   ```
 
-- **测试代码生成**: 读取一份模拟的 PRD，让 AI 自动生成 Python 测试代码。
+- **测试代码生成**: 读取外部的 PRD 文档，让 AI 自动生成 Python 测试代码。
   ```bash
-  python3 tests/generate_test.py
+  # 将您自己的需求文档保存为 my_prd.md，然后执行：
+  python3 tests/generate_test.py --prd docs/requirements/my_prd.md --out tests/test_my_feature.py
   ```
 
 运行结束后，您可以打开自动生成的 `docs/test_report.html` 查看精美的测试报告，或者在 `logs/` 目录下查看 AI 每一步决策的详细日志。
