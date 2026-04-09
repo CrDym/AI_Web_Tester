@@ -43,8 +43,9 @@
 
 ```text
 ai-web-tester/
+├── main.py                     # 统一的 CLI 程序主入口 (run / generate)
 ├── src/
-│   └── ai_tester/
+│   └── ai_tester/              # 框架核心代码
 │       ├── agent.py            # 🧠 AI 大脑：负责分析页面意图和自主探索执行 (ReAct 模式)
 │       ├── healer.py           # 🚑 元素自愈引擎：传统脚本失效时的守护者
 │       ├── asserter.py         # 🔍 智能断言引擎：评估页面语义状态
@@ -54,10 +55,12 @@ ai-web-tester/
 │       ├── pytest_plugin.py    # 📊 HTML 测试报告与 Pytest Hook
 │       └── inject/
 │           └── extract_elements.js  # 🚀 核心：注入浏览器端，提取高压缩率的语义交互树
-├── tests/
+├── examples/                   # 示例演示代码
+│   ├── conftest.py             # 引入测试报告和全局配置
 │   ├── test_demo.py            # 示例：混合编程测试（意图执行 + 智能断言 + 元素自愈）
-│   ├── test_template.py        # 模板：预置的空白测试用例，供您直接复制编写
-│   └── generate_test.py        # 示例：根据需求自动生成代码
+│   └── test_baidu_search.py    # 示例：由 AI 自动生成的自然语言测试脚本
+├── tests/                      # 您的业务测试代码目录
+│   └── test_template.py        # 模板：预置的空白测试用例，供您直接复制编写
 ├── docs/                       # 自动生成的 HTML 报告存放处
 └── TODO.md                     # 进阶开发计划与 Todo List
 ```
@@ -103,26 +106,30 @@ OPENAI_API_KEY=github_pat_xxxxxx
 
 ### 3. 运行演示用例与代码生成
 
-我们准备了三个综合演示脚本：
+框架提供了一个统一的入口命令 `python3 main.py`，让您可以更优雅地执行测试和生成代码：
+
+- **执行测试用例**:
+  ```bash
+  # 运行 examples 目录下的所有演示测试 (默认带 UI 界面)
+  python3 main.py run
+  
+  # 运行指定的测试文件，并开启无头模式 (不显示浏览器)
+  python3 main.py run examples/test_demo.py --headless
+  ```
+
+- **代码自动生成**: 读取外部的 PRD 文档或自然语言，让 AI 自动生成 Python 测试代码。
+  ```bash
+  # 方式 1：使用纯自然语言描述生成测试代码
+  python3 main.py generate --text "打开必应搜索，输入人工智能，断言页面标题包含人工智能" --out tests/test_bing.py
+  
+  # 方式 2：使用已有的 PRD 文档生成测试代码
+  python3 main.py generate --prd docs/requirements/my_prd.md --out tests/test_my_feature.py
+  ```
 
 - **基于模板编写**: 您可以直接复制预置的空白模板，填入自己的自然语言指令进行测试。
   ```bash
   cp tests/test_template.py tests/test_my_app.py
-  pytest tests/test_my_app.py -s
-  ```
-
-- **执行混合测试**: 展示了如何进行“意图操作”、“智能断言”以及“元素自愈”。
-  ```bash
-  pytest tests/test_demo.py -s
-  ```
-
-- **测试代码生成**: 支持读取外部 PRD 文档，或**直接通过自然语言字符串**让 AI 自动生成 Python 测试代码。
-  ```bash
-  # 方式 1：使用纯自然语言描述生成测试代码
-  python3 tests/generate_test.py --text "打开必应搜索，输入人工智能，断言页面标题包含人工智能" --out tests/test_bing.py
-  
-  # 方式 2：使用已有的 PRD 文档生成测试代码
-  python3 tests/generate_test.py --prd docs/requirements/my_prd.md --out tests/test_my_feature.py
+  python3 main.py run tests/test_my_app.py
   ```
 
 运行结束后，您可以打开自动生成的 `docs/test_report.html` 查看精美的测试报告，或者在 `logs/` 目录下查看 AI 每一步决策的详细日志。

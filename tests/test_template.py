@@ -1,4 +1,3 @@
-import pytest
 from ai_tester import PlaywrightDriver, AITesterAgent, SmartAsserter
 
 def test_custom_feature(page):

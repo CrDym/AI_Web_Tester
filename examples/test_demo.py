@@ -1,28 +1,15 @@
+import sys
 import os
-import pytest
-from playwright.sync_api import sync_playwright
-from ai_tester.driver import PlaywrightDriver
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
 from ai_tester.agent import AITesterAgent
 from ai_tester.healer import SelfHealer
 from ai_tester.asserter import SmartAsserter
 from ai_tester.logger import logger
+from ai_tester.driver import PlaywrightDriver
 from dotenv import load_dotenv
 
 load_dotenv()
-
-@pytest.fixture(scope="session")
-def browser():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False, slow_mo=500)
-        yield browser
-        browser.close()
-
-@pytest.fixture
-def page(browser):
-    context = browser.new_context()
-    page = context.new_page()
-    yield page
-    context.close()
 
 def test_login_with_ai_agent(page):
     """
