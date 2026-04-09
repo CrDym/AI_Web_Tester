@@ -1,0 +1,108 @@
+2026-04-09 16:16:12,256 - INFO - [agent.py:66] - 🎯 Starting intent: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 16:16:12,257 - INFO - [agent.py:71] - --- Step 1 ---
+2026-04-09 16:16:12,336 - INFO - [agent.py:91] - Thinking...
+2026-04-09 16:16:17,289 - INFO - [agent.py:99] - 📊 Token Usage: Prompt=660, Completion=25, Total=685
+2026-04-09 16:16:17,290 - INFO - [agent.py:116] - 🤖 LLM Decision: Action=type, Target=[13], Value=student
+2026-04-09 16:16:18,840 - INFO - [agent.py:71] - --- Step 2 ---
+2026-04-09 16:16:18,873 - INFO - [agent.py:91] - Thinking...
+2026-04-09 16:16:20,694 - INFO - [agent.py:99] - 📊 Token Usage: Prompt=671, Completion=26, Total=697
+2026-04-09 16:16:20,694 - INFO - [agent.py:116] - 🤖 LLM Decision: Action=type, Target=[14], Value=Password123
+2026-04-09 16:16:22,256 - INFO - [agent.py:71] - --- Step 3 ---
+2026-04-09 16:16:22,284 - INFO - [agent.py:91] - Thinking...
+2026-04-09 16:16:23,793 - INFO - [agent.py:99] - 📊 Token Usage: Prompt=685, Completion=18, Total=703
+2026-04-09 16:16:23,794 - INFO - [agent.py:116] - 🤖 LLM Decision: Action=click, Target=[15], Value=None
+2026-04-09 16:16:26,630 - INFO - [agent.py:71] - --- Step 4 ---
+2026-04-09 16:16:26,658 - INFO - [agent.py:91] - Thinking...
+2026-04-09 16:16:29,314 - INFO - [agent.py:99] - 📊 Token Usage: Prompt=506, Completion=18, Total=524
+2026-04-09 16:16:29,314 - INFO - [agent.py:116] - 🤖 LLM Decision: Action=done, Target=[null], Value=None
+2026-04-09 16:16:29,314 - INFO - [agent.py:119] - ✅ Intent completed successfully: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 16:16:29,403 - INFO - [asserter.py:33] - 🔍 Smart Assertion Triggered: 'The user has logged in successfully and a success message is displayed on the page.'
+2026-04-09 16:16:29,404 - INFO - [asserter.py:49] - Thinking...
+2026-04-09 16:16:36,073 - INFO - [asserter.py:56] - 📊 Token Usage: Prompt=325, Completion=69, Total=394
+2026-04-09 16:16:36,089 - INFO - [asserter.py:69] - ✅ Assertion PASSED. Reason: The DOM contains a section and an h1 element with the text 'Logged In Successfully' and a paragraph indicating a success message ('Congratulations student. You successfully logged in'). These elements confirm that the user has logged in successfully and a success message is displayed.
+2026-04-09 16:16:36,697 - INFO - [test_demo.py:61] - === 测试元素自愈机制 ===
+2026-04-09 16:17:07,004 - WARNING - [test_demo.py:80] - ⚠️ 传统脚本执行失败，触发 AI 自愈机制！错误信息: Page.fill: Timeout 2000ms exceeded.
+Call log:
+wait...
+2026-04-09 16:17:07,056 - WARNING - [healer.py:40] - 🚑 Self-Healing Triggered!
+2026-04-09 16:17:07,056 - INFO - [healer.py:41] -    Missing Selector: '#old-username-input'
+2026-04-09 16:17:07,056 - INFO - [healer.py:42] -    Element Intent: 'The username input field for login'
+2026-04-09 16:17:12,338 - INFO - [healer.py:70] -    ✅ Healed! Found new element [13]. Reason: The element with id '13' is an input field with the name 'username', which matches the description of the username input field for login.
+2026-04-09 16:17:12,339 - INFO - [test_demo.py:92] - 🔧 正在使用自愈后的新元素 ID [13] 继续执行操作...
+2026-04-09 16:17:12,871 - INFO - [test_demo.py:97] - 🎉 自愈操作执行成功！测试通过。
+2026-04-09 16:19:45,562 - INFO - [test_demo.py:61] - === 测试元素自愈机制 ===
+2026-04-09 16:19:52,274 - WARNING - [test_demo.py:80] - ⚠️ 传统脚本执行失败，触发 AI 自愈机制！错误信息: Page.fill: Timeout 2000ms exceeded.
+Call log:
+wait...
+2026-04-09 16:19:52,321 - WARNING - [healer.py:40] - 🚑 触发 AI 元素自愈机制!
+2026-04-09 16:19:52,322 - INFO - [healer.py:41] -    丢失的定位器: '#old-username-input'
+2026-04-09 16:19:52,322 - INFO - [healer.py:42] -    该元素的意图描述: 'The username input field for login'
+2026-04-09 16:19:56,312 - INFO - [healer.py:70] -    ✅ 自愈成功! 找到新的元素 ID: [13]. 原因: The element with id='13' is an input field with name='username', which matches the intent of the original selector as the username input field for login.
+2026-04-09 16:19:56,313 - INFO - [test_demo.py:92] - 🔧 正在使用自愈后的新元素 ID [13] 继续执行操作...
+2026-04-09 16:19:56,945 - INFO - [test_demo.py:97] - 🎉 自愈操作执行成功！测试通过。
+2026-04-09 16:20:34,883 - INFO - [agent.py:66] - 🎯 开始执行意图: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 16:20:34,883 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 16:20:34,934 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 16:20:38,145 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=662, Completion=25, 总计=687
+2026-04-09 16:20:38,145 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[13], 输入值=student
+2026-04-09 16:20:39,697 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 16:20:39,743 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 16:25:39,946 - INFO - [agent.py:66] - 🎯 开始执行意图: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 16:25:39,946 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 16:25:39,995 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 16:25:43,464 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=662, Completion=25, 总计=687
+2026-04-09 16:25:43,464 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[13], 输入值=student
+2026-04-09 16:25:45,006 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 16:25:45,033 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 16:25:46,624 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=676, Completion=26, 总计=702
+2026-04-09 16:25:46,624 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[14], 输入值=Password123
+2026-04-09 16:25:48,151 - INFO - [agent.py:71] - --- 步骤 3 ---
+2026-04-09 16:25:48,175 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 16:25:49,242 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=693, Completion=18, 总计=711
+2026-04-09 16:25:49,242 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=click, 目标ID=[15], 输入值=None
+2026-04-09 16:25:52,274 - INFO - [agent.py:71] - --- 步骤 4 ---
+2026-04-09 16:25:52,303 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 16:25:53,478 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=517, Completion=18, 总计=535
+2026-04-09 16:25:53,478 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 16:25:53,478 - INFO - [agent.py:119] - ✅ 意图执行成功: 'Login with username 'student' and password 'Password123', then click submit.'
+2026-04-09 16:25:53,550 - INFO - [asserter.py:33] - 🔍 触发智能断言: 'The user has logged in successfully and a success message is displayed on the page.'
+2026-04-09 16:25:53,550 - INFO - [asserter.py:49] - 智能断言正在思考中...
+2026-04-09 16:25:57,916 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=325, Completion=78, 总计=403
+2026-04-09 16:25:57,916 - INFO - [asserter.py:69] - ✅ 断言通过 (PASSED). 理由: The DOM contains a section and an h1 element with the text 'Logged In Successfully' and a paragraph with the text 'Congratulations student. You successfully logged in', which confirms that a success message is displayed. Additionally, a 'Log out' link is present, indicating the user is logged in.
+2026-04-09 16:25:58,531 - INFO - [test_demo.py:61] - === 测试元素自愈机制 ===
+2026-04-09 16:26:07,338 - WARNING - [test_demo.py:80] - ⚠️ 传统脚本执行失败，触发 AI 自愈机制！错误信息: Page.fill: Timeout 2000ms exceeded.
+Call log:
+wait...
+2026-04-09 16:26:07,371 - WARNING - [healer.py:40] - 🚑 触发 AI 元素自愈机制!
+2026-04-09 16:26:07,371 - INFO - [healer.py:41] -    丢失的定位器: '#old-username-input'
+2026-04-09 16:26:07,372 - INFO - [healer.py:42] -    该元素的意图描述: 'The username input field for login'
+2026-04-09 16:26:10,626 - INFO - [healer.py:70] -    ✅ 自愈成功! 找到新的元素 ID: [13]. 原因: The element with id '13' is an input field with the name 'username', which matches the intent of the original selector for the username input field.
+2026-04-09 16:26:10,627 - INFO - [test_demo.py:92] - 🔧 正在使用自愈后的新元素 ID [13] 继续执行操作...
+2026-04-09 16:26:11,234 - INFO - [test_demo.py:97] - 🎉 自愈操作执行成功！测试通过。
+2026-04-09 16:29:34,592 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=676, Completion=26, 总计=702
+2026-04-09 16:29:34,593 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[14], 输入值=Password123
+2026-04-09 16:29:34,606 - WARNING - [agent.py:130] - ⚠️ 动作执行失败: Action type failed on element 14: Page.fill: Target page, context or browser has been closed
+2026-04-09 16:29:34,606 - INFO - [agent.py:71] - --- 步骤 3 ---
+2026-04-09 16:29:35,390 - INFO - [test_demo.py:61] - === 测试元素自愈机制 ===
+2026-04-09 16:29:41,037 - WARNING - [test_demo.py:80] - ⚠️ 传统脚本执行失败，触发 AI 自愈机制！错误信息: Page.fill: Timeout 2000ms exceeded.
+Call log:
+wait...
+2026-04-09 16:29:41,068 - WARNING - [healer.py:40] - 🚑 触发 AI 元素自愈机制!
+2026-04-09 16:29:41,068 - INFO - [healer.py:41] -    丢失的定位器: '#old-username-input'
+2026-04-09 16:29:41,068 - INFO - [healer.py:42] -    该元素的意图描述: 'The username input field for login'
+2026-04-09 16:29:44,138 - INFO - [healer.py:70] -    ✅ 自愈成功! 找到新的元素 ID: [13]. 原因: The element with id='13' is an input field with name='username', which matches the description of the username input field for login.
+2026-04-09 16:29:44,139 - INFO - [test_demo.py:92] - 🔧 正在使用自愈后的新元素 ID [13] 继续执行操作...
+2026-04-09 16:29:44,679 - INFO - [test_demo.py:97] - 🎉 自愈操作执行成功！测试通过。
+2026-04-09 16:32:56,297 - INFO - [generator.py:62] - ⚙️ 开始根据需求文档自动生成测试脚本...
+2026-04-09 16:32:56,297 - INFO - [generator.py:77] - 大脑正在阅读需求文档并编写代码...
+2026-04-09 16:33:01,405 - INFO - [generator.py:94] - ✅ 测试脚本已成功生成并保存至: tests/test_generated_search.py
+2026-04-09 16:33:43,850 - INFO - [agent.py:66] - 🎯 开始执行意图: 'Locate the search bar at the top of the page and enter the keyword 'shirt'. Then press Enter or click the search button.'
+2026-04-09 16:33:43,851 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 16:33:43,896 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 16:33:48,781 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=598, Completion=18, 总计=616
+2026-04-09 16:33:48,782 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 16:33:48,782 - INFO - [agent.py:119] - ✅ 意图执行成功: 'Locate the search bar at the top of the page and enter the keyword 'shirt'. Then press Enter or click the search button.'
+2026-04-09 16:33:48,804 - INFO - [asserter.py:33] - 🔍 触发智能断言: 'Verify that the page navigates to the search results page and displays a list of products containing 'shirt'.'
+2026-04-09 16:33:48,804 - INFO - [asserter.py:49] - 智能断言正在思考中...
+2026-04-09 16:33:52,294 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=448, Completion=57, 总计=505
+2026-04-09 16:33:52,295 - ERROR - [asserter.py:71] - ❌ 断言失败 (FAILED). 理由: The DOM indicates an error page related to an invalid SSL certificate (Error code 526) and does not show any evidence of a search results page or a list of products containing 'shirt'.
