@@ -65,11 +65,11 @@ Rules:
         logger.info("⚙️ 开始根据需求文档自动生成测试脚本...")
         
         user_prompt = f"""
-Please generate the pytest script for the following PRD/Feature Description:
+Please generate the pytest script for the following PRD or natural language test scenario:
 
---- PRD START ---
+--- REQUIREMENT / SCENARIO START ---
 {prd_content}
---- PRD END ---
+--- REQUIREMENT / SCENARIO END ---
 """
         messages = [
             SystemMessage(content=self.system_prompt),

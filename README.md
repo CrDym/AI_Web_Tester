@@ -56,6 +56,7 @@ ai-web-tester/
 │           └── extract_elements.js  # 🚀 核心：注入浏览器端，提取高压缩率的语义交互树
 ├── tests/
 │   ├── test_demo.py            # 示例：混合编程测试（意图执行 + 智能断言 + 元素自愈）
+│   ├── test_template.py        # 模板：预置的空白测试用例，供您直接复制编写
 │   └── generate_test.py        # 示例：根据需求自动生成代码
 ├── docs/                       # 自动生成的 HTML 报告存放处
 └── TODO.md                     # 进阶开发计划与 Todo List
@@ -102,16 +103,25 @@ OPENAI_API_KEY=github_pat_xxxxxx
 
 ### 3. 运行演示用例与代码生成
 
-我们准备了两个综合演示脚本：
+我们准备了三个综合演示脚本：
+
+- **基于模板编写**: 您可以直接复制预置的空白模板，填入自己的自然语言指令进行测试。
+  ```bash
+  cp tests/test_template.py tests/test_my_app.py
+  pytest tests/test_my_app.py -s
+  ```
 
 - **执行混合测试**: 展示了如何进行“意图操作”、“智能断言”以及“元素自愈”。
   ```bash
   pytest tests/test_demo.py -s
   ```
 
-- **测试代码生成**: 读取外部的 PRD 文档，让 AI 自动生成 Python 测试代码。
+- **测试代码生成**: 支持读取外部 PRD 文档，或**直接通过自然语言字符串**让 AI 自动生成 Python 测试代码。
   ```bash
-  # 将您自己的需求文档保存为 my_prd.md，然后执行：
+  # 方式 1：使用纯自然语言描述生成测试代码
+  python3 tests/generate_test.py --text "打开必应搜索，输入人工智能，断言页面标题包含人工智能" --out tests/test_bing.py
+  
+  # 方式 2：使用已有的 PRD 文档生成测试代码
   python3 tests/generate_test.py --prd docs/requirements/my_prd.md --out tests/test_my_feature.py
   ```
 
