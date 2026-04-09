@@ -106,3 +106,35 @@ wait...
 2026-04-09 16:33:48,804 - INFO - [asserter.py:49] - 智能断言正在思考中...
 2026-04-09 16:33:52,294 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=448, Completion=57, 总计=505
 2026-04-09 16:33:52,295 - ERROR - [asserter.py:71] - ❌ 断言失败 (FAILED). 理由: The DOM indicates an error page related to an invalid SSL certificate (Error code 526) and does not show any evidence of a search results page or a list of products containing 'shirt'.
+2026-04-09 17:51:13,549 - INFO - [generator.py:65] - ⚙️ 开始根据需求文档自动生成测试脚本...
+2026-04-09 17:51:13,550 - INFO - [generator.py:80] - 大脑正在阅读需求文档并编写代码...
+2026-04-09 17:51:19,686 - INFO - [generator.py:97] - ✅ 测试脚本已成功生成并保存至: /Users/rockche/solo_test/tests/test_baidu_search.py
+2026-04-09 17:51:45,069 - INFO - [agent.py:66] - 🎯 开始执行意图: '在搜索框中输入 'OpenAI''
+2026-04-09 17:51:45,070 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 17:51:45,268 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 17:51:48,359 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=333, Completion=21, 总计=354
+2026-04-09 17:51:48,360 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=type, 目标ID=[1], 输入值=OpenAI
+2026-04-09 17:51:49,493 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 17:51:49,516 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 17:51:52,192 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=405, Completion=18, 总计=423
+2026-04-09 17:51:52,192 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 17:51:52,192 - INFO - [agent.py:119] - ✅ 意图执行成功: '在搜索框中输入 'OpenAI''
+2026-04-09 17:51:52,192 - INFO - [agent.py:66] - 🎯 开始执行意图: '点击 '百度一下' 按钮'
+2026-04-09 17:51:52,193 - INFO - [agent.py:71] - --- 步骤 1 ---
+2026-04-09 17:51:52,213 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 17:51:53,728 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=390, Completion=18, 总计=408
+2026-04-09 17:51:53,729 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=wait, 目标ID=[null], 输入值=None
+2026-04-09 17:51:53,730 - WARNING - [agent.py:130] - ⚠️ 动作执行失败: Action wait failed on element null: Unknown action: wait
+2026-04-09 17:51:53,730 - INFO - [agent.py:71] - --- 步骤 2 ---
+2026-04-09 17:51:53,746 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 17:51:55,306 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=413, Completion=18, 总计=431
+2026-04-09 17:51:55,306 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=click, 目标ID=[1], 输入值=None
+2026-04-09 17:51:56,371 - INFO - [agent.py:71] - --- 步骤 3 ---
+2026-04-09 17:51:56,391 - INFO - [agent.py:91] - 大模型正在思考中...
+2026-04-09 17:51:58,051 - INFO - [agent.py:99] - 📊 Token 消耗: Prompt=429, Completion=18, 总计=447
+2026-04-09 17:51:58,052 - INFO - [agent.py:116] - 🤖 大模型决策: 动作=done, 目标ID=[null], 输入值=None
+2026-04-09 17:51:58,052 - INFO - [agent.py:119] - ✅ 意图执行成功: '点击 '百度一下' 按钮'
+2026-04-09 17:51:58,068 - INFO - [asserter.py:33] - 🔍 触发智能断言: '页面展示与 'OpenAI' 相关的搜索结果列表'
+2026-04-09 17:51:58,068 - INFO - [asserter.py:49] - 智能断言正在思考中...
+2026-04-09 17:52:01,590 - INFO - [asserter.py:56] - 📊 Token 消耗: Prompt=250, Completion=48, 总计=298
+2026-04-09 17:52:01,591 - ERROR - [asserter.py:71] - ❌ 断言失败 (FAILED). 理由: The DOM does not contain any elements or text explicitly related to 'OpenAI' or a search results list. The provided elements are generic navigation links.

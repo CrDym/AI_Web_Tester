@@ -12,11 +12,16 @@ def main():
     load_dotenv()
     
     # 使用 argparse 处理命令行参数
-    parser = argparse.ArgumentParser(description="根据 PRD/需求文档自动生成测试代码")
+    parser = argparse.ArgumentParser(description="根据 PRD 或自然语言描述自动生成测试代码")
     parser.add_argument(
         "--prd", 
         type=str, 
-        help="PRD 文件路径 (例如: docs/requirements/login.md)。如果不提供，将使用内置的模拟需求。"
+        help="PRD 需求文件路径 (例如: docs/requirements/login.md)。如果不提供，将尝试读取 --text 参数。"
+    )
+    parser.add_argument(
+        "--text",
+        type=str,
+        help="自然语言测试描述 (例如: '打开百度，搜索 AI，预期结果是包含人工智能')。如果提供此参数，将忽略 --prd 参数。"
     )
     parser.add_argument(
         "--out", 
@@ -28,7 +33,12 @@ def main():
     args = parser.parse_args()
     
     # 确定要读取的需求内容
-    if args.prd:
+    if args.text:
+        # 优先使用直接输入的自然语言文本
+        prd_content = args.text
+        print(f"💬 已接收自然语言测试描述: '{args.text}'")
+    elif args.prd:
+        # 其次尝试读取外部 PRD 文件
         if not os.path.exists(args.prd):
             print(f"❌ 错误: 找不到 PRD 文件 '{args.prd}'")
             return
@@ -36,7 +46,7 @@ def main():
             prd_content = f.read()
         print(f"📄 已成功加载外部 PRD 文件: {args.prd}")
     else:
-        # 如果没有传入文件，使用内置的模拟 PRD
+        # 如果都没有提供，使用内置的模拟 PRD
         prd_content = """
         # 功能描述: 电商网站的商品搜索功能
         

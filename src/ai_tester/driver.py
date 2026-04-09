@@ -33,6 +33,8 @@ class PlaywrightDriver:
                 self.page.fill(selector, value)
             elif action == "scroll":
                 self.page.mouse.wheel(0, 500) # 简单模拟滚动
+            elif action == "wait":
+                self.page.wait_for_timeout(1000) # 等待 1 秒
             else:
                 raise ValueError(f"Unknown action: {action}")
         except Exception as e:

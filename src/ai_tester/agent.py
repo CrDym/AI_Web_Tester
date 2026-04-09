@@ -31,7 +31,7 @@ Choose exactly one of the following actions:
 1. `{"action": "click", "target_id": "1"}` - Click an element.
 2. `{"action": "type", "target_id": "2", "value": "hello"}` - Type text into an input field.
 3. `{"action": "scroll", "target_id": "null"}` - Scroll the page.
-4. `{"action": "wait", "target_id": "null"}` - Wait for elements to load.
+4. `{"action": "wait", "target_id": "null"}` - Wait for 1 second.
 5. `{"action": "done", "target_id": "null"}` - Intent is completed.
 
 Output strictly in JSON format. Do not include markdown backticks like ```json.
