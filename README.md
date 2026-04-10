@@ -141,6 +141,16 @@ OPENAI_API_KEY=github_pat_xxxxxx
 
 ---
 
+## ✅ 最佳实践
+
+- **优先用环境变量统一管理模型**：建议在 `.env` 里配置 `OPENAI_API_BASE / OPENAI_API_KEY / OPENAI_MODEL_NAME`，业务代码里尽量不硬编码 `model_name`，只在需要覆盖时传参（例如某个用例强制使用视觉模型）。
+- **控制单次意图的复杂度**：将长流程拆成多个 `agent.step(...)`，每个 step 最好可在 3–8 步内完成，避免大模型在复杂页面里探索过久导致 Token 暴涨。
+- **意图里明确“完成条件”**：在意图末尾明确写清楚“完成后必须返回 done”，能显著减少模型在任务已完成后继续尝试的概率。
+- **默认关闭视觉，按需开启**：`use_vision=False` 通常更省 Token；只有遇到复杂组件（卡片、表格、浮层、多列布局、动态列表）或 DOM 信息不足时再启用 `use_vision=True`，或使用 `auto_vision=True` 让框架自行兜底切换。
+- **充分利用缓存回放机制**：同一条稳定意图跑通一次后会写入本地缓存，后续回归优先命中回放实现 0 Token；当 UI 变更导致回放失败时才会唤醒大模型重新探索。
+- **减少无效点击与遮挡问题**：遇到 “intercepts pointer events” 或遮挡浮层时，优先在意图里加入“先关闭弹窗/遮罩/引导层”或“滚动到可见区域后再点击”的描述；必要时拆分成“关闭干扰 → 再点击目标”两步意图。
+- **排查问题的推荐方式**：优先用 `--headless` 跑回归；复现问题时切换为有头模式并打开日志（`logs/`）观察每一步的目标元素与 Token 消耗；如果页面频繁改版，清理缓存后重新跑一次以生成新的稳定路径。
+
 ## 🛠️ 使用示例
 
 您可以将 `ai_tester` 作为一个常规的 Python 包，在任何业务测试中灵活调用。
@@ -154,9 +164,9 @@ from ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer
 
 def test_login_with_healing(page):
     driver = PlaywrightDriver(page)
-    # 推荐使用性能较强的模型处理复杂页面
-    agent = AITesterAgent(driver, model_name="gpt-4o", use_vision=False, auto_vision=True)
-    healer = SelfHealer(model_name="gpt-4o", use_vision=True)
+    # 推荐在 .env 中设置 OPENAI_MODEL_NAME，这里不强行写死模型
+    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)
+    healer = SelfHealer(use_vision=True)
 
     broken_selector = "#old-login-btn"
     
@@ -184,8 +194,8 @@ from ai_tester import PlaywrightDriver, AITesterAgent, SmartAsserter
 
 def test_search_feature(page):
     driver = PlaywrightDriver(page)
-    agent = AITesterAgent(driver, model_name="gpt-4o", use_vision=False, auto_vision=True)
-    asserter = SmartAsserter(model_name="gpt-4o", use_vision=True)
+    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)
+    asserter = SmartAsserter(use_vision=True)
     
     page.goto("https://example.com")
     
@@ -217,7 +227,7 @@ def test_data_extractor(page):
     page.goto("https://practicetestautomation.com/practice-test-login/")
     
     # 使用 use_vision=True 获取更精准的结构化提取能力
-    extractor = DataExtractor(driver, model_name="gpt-4o-mini", use_vision=True)
+    extractor = DataExtractor(driver, use_vision=True)
     
     # 通过自然语言提取页面上的账号和密码提示信息
     query = "提取页面上提示的 Test username 和 Test password，返回格式: {\"username\": \"...\", \"password\": \"...\"}"
@@ -231,7 +241,7 @@ def test_data_extractor(page):
 ```python
 from ai_tester import TestCaseGenerator
 
-generator = TestCaseGenerator(model_name="gpt-4o")
+generator = TestCaseGenerator()
 
 prd_text = """
 功能：用户注册

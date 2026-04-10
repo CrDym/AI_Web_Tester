@@ -4,6 +4,7 @@ from typing import Dict, Any, Tuple
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
+from . import run_context
 
 class SmartAsserter:
     def __init__(self, model_name: str = None, temperature: float = 0.0, use_vision: bool = False):
@@ -34,6 +35,7 @@ Return ONLY a JSON object in this exact format:
         根据页面 DOM (和可选的截图) 以及自然语言断言条件，返回判断结果
         """
         logger.info(f"🔍 触发智能断言: '{assertion_condition}'")
+        run_context.record_event("assert_start", assertion_condition)
         
         user_prompt = f"""
 Assertion Condition: {assertion_condition}
@@ -61,11 +63,13 @@ Is the assertion condition true based on the DOM/screenshot?
             logger.info("智能断言正在思考中...")
             response = self.llm.invoke(messages)
             content = response.content.strip()
+            usage = None
             
             # 打印 Token 消耗情况
             if hasattr(response, 'response_metadata') and 'token_usage' in response.response_metadata:
                 usage = response.response_metadata['token_usage']
                 logger.info(f"📊 Token 消耗: Prompt={usage.get('prompt_tokens', 0)}, Completion={usage.get('completion_tokens', 0)}, 总计={usage.get('total_tokens', 0)}")
+            run_context.record_event("assert_llm", assertion_condition, token_usage=usage or None)
             
             if content.startswith("```json"):
                 content = content[7:-3].strip()
@@ -81,9 +85,11 @@ Is the assertion condition true based on the DOM/screenshot?
                 logger.info(f"✅ 断言通过 (PASSED). 理由: {reason}")
             else:
                 logger.error(f"❌ 断言失败 (FAILED). 理由: {reason}")
+            run_context.record_event("assert_end", f"result={is_true} reason={reason}")
                 
             return is_true
             
         except Exception as e:
             logger.error(f"❌ 智能断言引擎发生异常: {str(e)}")
+            run_context.record_event("assert_error", str(e))
             return False

@@ -3,6 +3,7 @@ import json
 from typing import Dict, Any, Tuple
 from .driver import PlaywrightDriver
 from .logger import logger
+from . import run_context
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
@@ -191,6 +192,7 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
         支持稳定脚本缓存回放，跳过大模型。
         """
         logger.info(f"🎯 开始执行意图: '{intent}'")
+        run_context.record_event("intent_start", intent)
         
         # 0. 尝试缓存回放机制 (Record & Replay)
         cache_dir = ".intent_cache"
@@ -203,12 +205,14 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cached_actions = json.load(f)
                 logger.info(f"⚡ 命中稳定运行的脚本缓存！直接重放之前的 {len(cached_actions)} 个动作，跳过大模型分析。")
+                run_context.record_event("intent_replay_start", f"{intent} (actions={len(cached_actions)})")
                 replay_success = True
                 for act in cached_actions:
                     action = act["action"]
                     selector = act["selector"]
                     value = act.get("value")
                     logger.info(f"   🔄 重放动作: {action} 元素: '{selector}' 值: {value}")
+                    run_context.record_event("replay_action", f"{action} {selector} {value}")
                     try:
                         if selector == "body" and action in ["scroll", "wait"]:
                             # 全局动作直接执行，忽略 selector
@@ -223,9 +227,11 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
                 
                 if replay_success:
                     logger.info(f"✅ 缓存重放执行成功！")
+                    run_context.record_event("intent_end", f"{intent} (replay_success)")
                     return True
             except Exception as e:
                 logger.warning(f"⚠️ 读取或执行缓存失败: {e}")
+                run_context.record_event("intent_replay_failed", str(e))
 
         # 缓存回放失败或没有缓存，走大模型
         action_history = []
@@ -236,6 +242,7 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
         
         for step_idx in range(max_steps):
             logger.info(f"--- 步骤 {step_idx + 1} ---")
+            run_context.record_event("step_start", f"{intent} / step {step_idx + 1}")
             
             # 智能视觉回退 (Auto Vision Fallback)
             # 如果连续失败(或者连续执行了重复无效动作)达到了 2 次，且允许自动开启视觉
@@ -243,6 +250,7 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
                 logger.warning("👀 纯文本 DOM 分析连续受挫，框架已自动开启【多模态视觉+红框标注】进行降维打击！")
                 current_use_vision = True
                 consecutive_failures = 0
+                run_context.record_event("auto_vision_on", f"{intent} / step {step_idx + 1}")
                 
             # 1. 提取当前页面状态（核心：DOM压缩降维）
             page_data = self.driver.get_dom_snapshot()
@@ -260,16 +268,20 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
             
             if current_use_vision:
                 import base64
-                debug_dir = "logs/debug_screenshots"
+                base_dir = os.environ.get("AI_TESTER_RUN_DIR") or os.path.join(os.getcwd(), "logs")
+                test_nodeid = run_context.get_current_test() or "unknown"
+                debug_dir = os.path.join(base_dir, "debug_screenshots", run_context.sanitize_for_path(test_nodeid))
                 os.makedirs(debug_dir, exist_ok=True)
                 
                 # 如果 b64_img 还没生成，则在这里生成（避免重复调用 screenshot）
                 # 这里为了简化，我们调整一下逻辑顺序，先生成截图再构造 prompt 和保存调试图
                 b64_img = self.driver.get_screenshot(page_data.get('elements', []))
                 
-                with open(f"{debug_dir}/step_{step_idx+1}.jpg", "wb") as f:
+                screenshot_path = os.path.join(debug_dir, f"step_{step_idx+1}.jpg")
+                with open(screenshot_path, "wb") as f:
                     f.write(base64.b64decode(b64_img))
-                logger.debug(f"带框截图已保存至 {debug_dir}/step_{step_idx+1}.jpg")
+                logger.debug(f"带框截图已保存至 {screenshot_path}")
+                run_context.record_event("debug_screenshot", screenshot_path)
                 
                 human_content = [
                     {"type": "text", "text": user_prompt},
@@ -294,10 +306,12 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
             try:
                 response = self.llm.invoke(messages)
                 content = response.content.strip()
+                step_usage = None
                 
                 # 打印 Token 消耗情况
                 if hasattr(response, 'response_metadata') and 'token_usage' in response.response_metadata:
                     usage = response.response_metadata['token_usage']
+                    step_usage = usage
                     step_tokens = usage.get('total_tokens', 0)
                     intent_tokens += step_tokens
                     self.total_tokens += step_tokens
@@ -313,6 +327,7 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
             except Exception as e:
                 logger.error(f"❌ 解析大模型响应失败: {str(e)}\n原始响应: {response.content if 'response' in locals() else 'None'}")
                 logger.info(f"🏁 本次意图累计消耗 Token: {intent_tokens}, Agent 全局累计消耗: {self.total_tokens}")
+                run_context.record_event("llm_parse_error", str(e))
                 return False
                 
             action = action_data.get("action")
@@ -320,6 +335,7 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
             value = action_data.get("value")
             
             logger.info(f"🤖 大模型决策: 动作={action}, 目标ID=[{target_id}], 输入值={value}")
+            run_context.record_event("llm_action", f"action={action} target_id={target_id} value={value}", token_usage=step_usage or None)
             
             # 找到对应 target_id 的 css_selector，供缓存记录使用
             css_selector = None
@@ -345,6 +361,7 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
                         
                 logger.info(f"✅ 意图执行成功: '{intent}'")
                 logger.info(f"🏁 本次意图累计消耗 Token: {intent_tokens}, Agent 全局累计消耗: {self.total_tokens}")
+                run_context.record_event("intent_end", f"{intent} (success)", extra={"intent_tokens": intent_tokens, "agent_total_tokens": self.total_tokens})
                 return True
                 
             # 3. 执行动作
@@ -366,9 +383,10 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
 
                 # 检查是否陷入死循环 (比如连续3次点击同一个元素却没有完成意图)
                 if len(action_history) >= 2 and all(record.split(" (⚠️")[0] == action_record for record in action_history[-2:]):
-                    consecutive_failures += 1.5 # 加大死循环的惩罚力度
+                    consecutive_failures += 1.5
                     logger.warning(f"⚠️ 检测到大模型可能陷入重复动作的死循环 ({action_record})")
                     action_record += " (⚠️ 警告: 该动作未产生预期效果，陷入死循环！请尝试滚动页面、更换策略或返回 done)"
+                    run_context.record_event("dead_loop", action_record)
                 else:
                     # 动作看起来是新的，稍微减少一点失败计数，但如果之前是连续报错的则保留
                     if consecutive_failures > 0:
@@ -380,14 +398,17 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
                 
                 if consecutive_failures >= 3:
                     logger.error("❌ 连续失败/死循环次数过多，自动终止当前意图的探索。")
+                    run_context.record_event("intent_end", f"{intent} (aborted)", extra={"intent_tokens": intent_tokens, "agent_total_tokens": self.total_tokens})
                     return False
             except Exception as e:
                 logger.warning(f"⚠️ 动作执行失败: {str(e)}")
                 action_history.append(f"执行失败: {action} 于 [{target_id}] - 错误: {str(e)}")
                 consecutive_failures += 1
+                run_context.record_event("action_error", f"{action} target_id={target_id} err={str(e)}")
                 
                 if consecutive_failures >= 3:
                     logger.error("❌ 连续执行失败次数过多，自动终止当前意图的探索。")
+                    run_context.record_event("intent_end", f"{intent} (aborted)", extra={"intent_tokens": intent_tokens, "agent_total_tokens": self.total_tokens})
                     return False
                 # 在真实框架中，这里可以触发“自愈（Self-Healing）”机制或抛出异常
                 
