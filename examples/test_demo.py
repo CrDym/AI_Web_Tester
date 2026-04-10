@@ -22,8 +22,8 @@ def test_login_with_ai_agent(page):
 
     # AI Agent 驱动执行（意图驱动，解决脚本脆弱性）
     driver = PlaywrightDriver(page)
-    # 这里使用豆包模型
-    agent = AITesterAgent(driver, model_name="doubao-seed-2-0-lite-260215")
+    # 这里使用环境变量中配置的模型（如果未配置则默认 gpt-4o-mini）
+    agent = AITesterAgent(driver)
     
     # 用自然语言描述测试步骤
     intent_str = "Login with username 'student' and password 'Password123', then click submit."
@@ -41,7 +41,7 @@ def test_login_with_ai_agent(page):
     assert success is True
     
     # AI 智能断言验证登录结果
-    asserter = SmartAsserter(model_name="doubao-seed-2-0-lite-260215")
+    asserter = SmartAsserter()
     current_dom = agent.get_dom_tree_str()
     
     # 通过自然语言断言
@@ -57,7 +57,7 @@ def test_data_extractor(page):
     
     driver = PlaywrightDriver(page)
     # 使用 use_vision=True 获取更精准的结构化提取能力
-    extractor = DataExtractor(driver, model_name="doubao-seed-2-0-lite-260215", use_vision=True)
+    extractor = DataExtractor(driver, use_vision=True)
     
     # 通过自然语言提取页面上的账号和密码提示信息
     query = "提取页面上提示的 Test username 和 Test password，返回格式: {\"username\": \"...\", \"password\": \"...\"}"
@@ -77,8 +77,8 @@ def test_self_healing_mechanism(page):
     page.goto("https://practicetestautomation.com/practice-test-login/", wait_until="domcontentloaded", timeout=60000)
 
     driver = PlaywrightDriver(page)
-    agent = AITesterAgent(driver, model_name="doubao-seed-2-0-lite-260215")
-    healer = SelfHealer(model_name="doubao-seed-2-0-lite-260215")
+    agent = AITesterAgent(driver)
+    healer = SelfHealer()
         
     # 假设这是传统的脚本代码，我们写死了一个 CSS Selector：
     # 原本应该是 "#username"，但由于前端重构，现在它变成了类似 "#user-name-v2"

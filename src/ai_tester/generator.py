@@ -6,9 +6,10 @@ from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
 
 class TestCaseGenerator:
-    def __init__(self, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.2):
+    def __init__(self, model_name: str = None, temperature: float = 0.2):
+        final_model_name = model_name or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
         self.llm = ChatOpenAI(
-            model=model_name,
+            model=final_model_name,
             temperature=temperature,
             api_key=os.environ.get("OPENAI_API_KEY"),
             base_url=os.environ.get("OPENAI_API_BASE")

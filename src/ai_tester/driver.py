@@ -52,46 +52,54 @@ class PlaywrightDriver:
         else:
             selector = None
             
-        try:
-            # 多 frame 穿透定位器
-            target_locator = None
-            if selector:
-                if self.page.locator(selector).count() > 0:
-                    target_locator = self.page.locator(selector).first
-                else:
-                    # 如果主页面找不到，去各个 iframe 里找
-                    for frame in self.page.frames:
-                        if frame.locator(selector).count() > 0:
-                            target_locator = frame.locator(selector).first
-                            break
-                
-                # 如果都没找到，fallback 给 page 让它抛出正确的 TimeoutError
-                if not target_locator:
-                    target_locator = self.page.locator(selector)
-
-            if action == "click":
-                target_locator.click()
-            elif action == "type":
-                target_locator.fill(value)
-            elif action == "hover":
-                target_locator.hover()
-            elif action == "select_option":
-                target_locator.select_option(value)
-            elif action == "drag_and_drop":
-                # 简单的 drag and drop 实现，跨 frame 拖拽暂不考虑
-                target_selector = f"[ai-id='{value}']"
-                self.page.drag_and_drop(selector, target_selector)
-            elif action == "press_key":
-                self.page.keyboard.press(value)
-            elif action == "scroll":
-                self.page.mouse.wheel(0, 500) 
-            elif action == "wait":
-                self.page.wait_for_timeout(1000) 
+        target_locator = None
+        if selector:
+            if self.page.locator(selector).count() > 0:
+                target_locator = self.page.locator(selector).first
             else:
-                raise ValueError(f"Unknown action: {action}")
-        except Exception as e:
-            # 记录异常，后续触发自愈机制
-            raise Exception(f"Action {action} failed on element {target_id}: {str(e)}")
+                for frame in self.page.frames:
+                    if frame.locator(selector).count() > 0:
+                        target_locator = frame.locator(selector).first
+                        break
+
+            if not target_locator:
+                target_locator = self.page.locator(selector)
+
+        for attempt in range(2):
+            try:
+                if action == "click":
+                    target_locator.click()
+                elif action == "type":
+                    target_locator.fill(value)
+                elif action == "hover":
+                    target_locator.hover()
+                elif action == "select_option":
+                    target_locator.select_option(value)
+                elif action == "drag_and_drop":
+                    target_selector = f"[ai-id='{value}']"
+                    self.page.drag_and_drop(selector, target_selector)
+                elif action == "press_key":
+                    self.page.keyboard.press(value)
+                elif action == "scroll":
+                    self.page.mouse.wheel(0, 500)
+                elif action == "wait":
+                    self.page.wait_for_timeout(1000)
+                else:
+                    raise ValueError(f"Unknown action: {action}")
+                return
+            except Exception as e:
+                msg = str(e)
+                if attempt == 0 and ("intercepts pointer events" in msg or "cf-modal-wrap" in msg):
+                    try:
+                        self.page.keyboard.press("Escape")
+                        self.page.wait_for_timeout(500)
+                        if self.page.locator(".cf-modal-close").count() > 0:
+                            self.page.locator(".cf-modal-close").first.click()
+                            self.page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+                    continue
+                raise Exception(f"Action {action} failed on element {target_id}: {msg}")
 
     def get_screenshot(self, elements_data: list = None) -> str:
         """
