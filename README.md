@@ -31,11 +31,15 @@
 ## ✨ 核心特性
 
 - 🗣️ **意图驱动执行 (Intent-Driven)**：无需编写选择器，直接使用 `agent.step("在搜索框输入 iPhone 并点击搜索")`，AI 会自动寻找目标并执行动作。
+- 👁️ **多模态视觉与红框标注 (Visual Bounding Box)**：完美吸收 Midscene.js 的精髓。支持截取当前页面并自动在元素上绘制带有 ID 的红框，结合 GPT-4o 视觉能力，精准处理复杂嵌套卡片和动态 UI。
 - 🚑 **底层元素自愈 (Self-Healing)**：完美兼容现有传统脚本。当原本写死的 CSS 选择器失效时，拦截错误并触发大模型“看懂”当前页面，自动找到新的元素位置继续执行，测试不再中断！
+- ⚡ **意图缓存回放 (Intent Cache & Replay)**：首次执行意图时记录原生 CSS 选择器操作，后续执行秒级缓存回放，**0 Token 消耗，毫秒级运行**。只有重放失败时才唤醒大模型重新探索。
+- ✍️ **自动代码回写 (Auto Code Rewrite)**：当 AI 成功探索出一条执行路径后，会自动定位调用它的 Python 测试文件，将原生的 Playwright 代码（如 `page.click`, `page.fill`）写回文件并注释掉大模型调用代码，彻底消除对 AI 的依赖！
 - 📝 **PRD 到代码全自动生成 (Test Generation)**：传入一段自然语言的产品需求文档 (PRD)，框架自动输出带有 Playwright 和 AI 驱动的 pytest 规范脚本。
-- 🧠 **语义智能断言 (Smart Assertion)**：告别死板的 `assert "success" in text`。使用 `asserter.evaluate(dom, "用户已成功登录且看到了欢迎横幅")`。
-- ⚡ **Token 极致压缩 (Accessibility Tree)**：内置底层的 JS 注入引擎，过滤无效标签与不可见元素，将上百 KB 的 HTML 压缩为精简的“交互无障碍树”，Token 消耗降低 **90%**，响应快且成本极低！
-- 📊 **现代化的测试报告与日志**：零配置自动生成基于 Tailwind CSS 的美观 HTML 测试报告，并自带详细的中文执行轨迹日志。
+- 🔍 **智能数据提取 (Data Extractor)**：内置 `DataExtractor`，基于视觉和 DOM，用自然语言快速将页面上复杂的表格或卡片列表转换为结构化的 JSON 数据。
+- 🧠 **语义智能断言 (Smart Assertion)**：告别死板的 `assert "success" in text`。使用 `asserter.evaluate(dom, "用户已成功登录且看到了欢迎横幅", screenshot)`。
+- 📉 **极致 Token 压缩与视口裁剪 (Viewport Pruning)**：内置底层的 JS 注入引擎，仅提取当前视口内可见元素，精简属性输出。在非视觉模式下单步操作仅需不到 1000 Token。
+- 📊 **现代化测试报告与日志管理**：零配置自动生成基于 Tailwind CSS 的美观 HTML 测试报告。日志支持自动轮转保留，用例失败时自动生成现场截图。
 
 ---
 
@@ -49,6 +53,7 @@ ai-web-tester/
 │       ├── agent.py            # 🧠 AI 大脑：负责分析页面意图和自主探索执行 (ReAct 模式)
 │       ├── healer.py           # 🚑 元素自愈引擎：传统脚本失效时的守护者
 │       ├── asserter.py         # 🔍 智能断言引擎：评估页面语义状态
+│       ├── extractor.py        # 📊 智能提取引擎：页面数据提取爬虫
 │       ├── generator.py        # ⚙️ 测试生成器：读取 PRD 并输出 pytest 代码
 │       ├── driver.py           # 🚗 驱动层：封装 Playwright 动作
 │       ├── logger.py           # 📝 格式化全中文日志模块
@@ -140,60 +145,88 @@ OPENAI_API_KEY=github_pat_xxxxxx
 
 您可以将 `ai_tester` 作为一个常规的 Python 包，在任何业务测试中灵活调用。
 
-### 场景一：混合编程（传统性能 + AI 鲁棒性）
+### 场景一：混合编程（0 Token 高速回放 + AI 自愈兜底）
 
-在日常回归测试中，为了追求极致速度，我们依然可以使用传统选择器。当选择器因前端重构而失效时，再让 AI 兜底自愈。
+在日常回归测试中，为了追求极致速度，我们依然可以使用传统选择器（或让大模型执行过一次产生的缓存）。当选择器因前端重构而失效时，再让 AI 兜底自愈。
 
 ```python
 from ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer
 
 def test_login_with_healing(page):
     driver = PlaywrightDriver(page)
-    agent = AITesterAgent(driver, model_name="gpt-4o-mini")
-    healer = SelfHealer(model_name="gpt-4o-mini")
+    # 推荐使用性能较强的模型处理复杂页面
+    agent = AITesterAgent(driver, model_name="gpt-4o", use_vision=False, auto_vision=True)
+    healer = SelfHealer(model_name="gpt-4o", use_vision=True)
 
     broken_selector = "#old-login-btn"
     
     try:
-        # 1. 尝试极速的传统执行
+        # 1. 尝试极速的传统执行 (0 Token, 毫秒级)
         page.click(broken_selector, timeout=2000)
     except Exception:
         # 2. 如果因为 UI 变更报错，触发 AI 元素自愈
         current_dom = agent.get_dom_tree_str()
+        screenshot = driver.get_screenshot()
         
         # 告诉 AI 那个失效的按钮是干什么用的
-        new_id = healer.heal(broken_selector, "The login submit button", current_dom)
+        new_id_or_selector = healer.heal(broken_selector, "登录提交按钮", current_dom, screenshot)
         
-        # 使用 AI 找到的新 ID 继续执行测试！
-        driver.perform_action("click", new_id)
+        # 使用 AI 找到的新目标继续执行测试！
+        driver.perform_action("click", new_id_or_selector)
 ```
 
-### 场景二：完全意图驱动与智能断言
+### 场景二：完全意图驱动与代码自动回写
 
-彻底抛弃定位器，用人类语言测试页面。
+彻底抛弃定位器，用人类语言测试页面。跑通一次后，框架自动帮你把测试代码写好！
 
 ```python
 from ai_tester import PlaywrightDriver, AITesterAgent, SmartAsserter
 
 def test_search_feature(page):
     driver = PlaywrightDriver(page)
-    agent = AITesterAgent(driver, model_name="gpt-4o")
-    asserter = SmartAsserter(model_name="gpt-4o")
+    agent = AITesterAgent(driver, model_name="gpt-4o", use_vision=False, auto_vision=True)
+    asserter = SmartAsserter(model_name="gpt-4o", use_vision=True)
     
     page.goto("https://example.com")
     
-    # 意图驱动执行多步操作
-    agent.step("在顶部搜索框输入 'iPhone 15'，然后按下回车键")
+    # 意图驱动执行多步操作。
+    # 💡 魔法时刻：当这行代码成功运行一次后，它会被自动注释掉，
+    # 并在下方自动生成原生的 page.fill 和 page.click 代码！
+    agent.step("在顶部搜索框输入 'iPhone 15'，然后按下回车键，结束后返回 done")
     
-    # 语义化断言
+    # 语义化多模态断言
+    current_dom = agent.get_dom_tree_str()
+    screenshot = driver.get_screenshot()
     is_passed = asserter.evaluate(
-        agent.get_dom_tree_str(), 
-        "页面跳转到了搜索结果，并且展示了多款 iPhone 15 的商品列表"
+        current_dom, 
+        "页面跳转到了搜索结果，并且展示了多款 iPhone 15 的商品列表",
+        screenshot
     )
     assert is_passed is True
 ```
 
-### 场景三：从需求文档 (PRD) 直接生成测试代码
+### 场景三：智能数据提取 (Data Extractor)
+
+除了动作和断言，AI 还能作为您的“智能爬虫”和“表格读取器”，直接将复杂的页面转化为结构化的 JSON 数据。
+
+```python
+from ai_tester import PlaywrightDriver, DataExtractor
+
+def test_data_extractor(page):
+    driver = PlaywrightDriver(page)
+    page.goto("https://practicetestautomation.com/practice-test-login/")
+    
+    # 使用 use_vision=True 获取更精准的结构化提取能力
+    extractor = DataExtractor(driver, model_name="gpt-4o-mini", use_vision=True)
+    
+    # 通过自然语言提取页面上的账号和密码提示信息
+    query = "提取页面上提示的 Test username 和 Test password，返回格式: {\"username\": \"...\", \"password\": \"...\"}"
+    data = extractor.extract(query)
+    
+    assert data.get("username") == "student"
+```
+
+### 场景四：从需求文档 (PRD) 直接生成测试代码
 
 ```python
 from ai_tester import TestCaseGenerator

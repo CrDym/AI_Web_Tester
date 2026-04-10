@@ -6,7 +6,8 @@ from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
 
 class SmartAsserter:
-    def __init__(self, model_name: str = "gpt-4o-mini", temperature: float = 0.0):
+    def __init__(self, model_name: str = "gpt-4o-mini", temperature: float = 0.0, use_vision: bool = False):
+        self.use_vision = use_vision
         self.llm = ChatOpenAI(
             model=model_name,
             temperature=temperature,
@@ -17,18 +18,19 @@ class SmartAsserter:
         self.system_prompt = """
 You are an expert Web Automation QA Engineer.
 You will be provided with a compressed DOM tree (Accessibility Tree) of the current web page.
-You need to evaluate whether a specific assertion condition (natural language) is TRUE or FALSE based entirely on the provided DOM.
+You may also be provided with a screenshot of the current page if vision is enabled.
+You need to evaluate whether a specific assertion condition (natural language) is TRUE or FALSE based entirely on the provided DOM and screenshot.
 
 Return ONLY a JSON object in this exact format:
 {
     "result": true or false,
-    "reason": "a brief explanation of your judgment based on the DOM elements found or missing"
+    "reason": "a brief explanation of your judgment based on the DOM elements found or missing (and visual evidence if provided)"
 }
 """
 
-    def evaluate(self, dom_tree_str: str, assertion_condition: str) -> bool:
+    def evaluate(self, dom_tree_str: str, assertion_condition: str, screenshot_base64: str = None) -> bool:
         """
-        根据页面 DOM 和自然语言断言条件，返回判断结果
+        根据页面 DOM (和可选的截图) 以及自然语言断言条件，返回判断结果
         """
         logger.info(f"🔍 触发智能断言: '{assertion_condition}'")
         
@@ -38,11 +40,20 @@ Assertion Condition: {assertion_condition}
 Current DOM:
 {dom_tree_str}
 
-Is the assertion condition true based on the DOM?
+Is the assertion condition true based on the DOM/screenshot?
 """
+        if self.use_vision and screenshot_base64:
+            human_content = [
+                {"type": "text", "text": user_prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_base64}"}}
+            ]
+            logger.debug("已附加当前页面截图辅助智能断言。")
+        else:
+            human_content = user_prompt
+
         messages = [
             SystemMessage(content=self.system_prompt),
-            HumanMessage(content=user_prompt)
+            HumanMessage(content=human_content)
         ]
         
         try:

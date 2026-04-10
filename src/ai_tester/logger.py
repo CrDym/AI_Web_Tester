@@ -1,12 +1,13 @@
 import logging
 import sys
 import os
+import glob
 from datetime import datetime
 
 def setup_logger():
     """
     配置并返回全局的 logger
-    日志将同时输出到控制台和文件
+    日志将同时输出到控制台和文件。每次运行生成新文件，最多保留 10 个。
     """
     logger = logging.getLogger("ai_tester")
     
@@ -31,10 +32,27 @@ def setup_logger():
     log_dir = os.path.join(os.getcwd(), "logs")
     os.makedirs(log_dir, exist_ok=True)
     
-    log_file = os.path.join(log_dir, f"ai_tester_{datetime.now().strftime('%Y%m%d')}.log")
+    # 每次测试生成一个新的带有时间戳的日志文件
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = os.path.join(log_dir, f"ai_tester_{timestamp}.log")
+    
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
+
+    # 3. 清理旧日志文件，最多保留 10 个
+    try:
+        log_files = glob.glob(os.path.join(log_dir, "ai_tester_*.log"))
+        # 按修改时间排序，最旧的在前面
+        log_files.sort(key=os.path.getmtime)
+        
+        # 如果超过 10 个，删除最旧的
+        if len(log_files) > 10:
+            files_to_delete = log_files[:-10]
+            for f in files_to_delete:
+                os.remove(f)
+    except Exception as e:
+        print(f"⚠️ 清理旧日志文件时发生异常: {e}")
 
     return logger
 

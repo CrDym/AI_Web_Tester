@@ -15,13 +15,30 @@ def browser():
     with sync_playwright() as p:
         # 支持从 main.py 环境变量接收是否以无头模式运行
         headless_mode = os.environ.get("PLAYWRIGHT_HEADLESS") == "1"
-        browser = p.chromium.launch(headless=headless_mode, slow_mo=500)
+        browser = p.chromium.launch(
+            headless=headless_mode, 
+            slow_mo=1000, # 减慢执行速度方便我们看清 UI
+            args=['--window-size=1920,1080']
+        )
         yield browser
         browser.close()
 
 @pytest.fixture
-def page(browser):
-    context = browser.new_context()
+def page(browser, request):
+    context = browser.new_context(viewport={'width': 1920, 'height': 1080})
     page = context.new_page()
     yield page
+    
+    # 检查测试用例是否失败，如果失败则截图
+    if hasattr(request.node, "rep_call") and request.node.rep_call.failed:
+        screenshot_dir = os.path.join(os.getcwd(), "logs", "failure_screenshots")
+        os.makedirs(screenshot_dir, exist_ok=True)
+        # 用测试用例名称生成截图文件名
+        screenshot_path = os.path.join(screenshot_dir, f"{request.node.name}_failed.png")
+        try:
+            page.screenshot(path=screenshot_path)
+            print(f"\n📸 测试用例 [{request.node.name}] 失败！截图已保存至: {screenshot_path}")
+        except Exception as e:
+            print(f"\n⚠️ 保存失败截图时发生异常: {e}")
+            
     context.close()
