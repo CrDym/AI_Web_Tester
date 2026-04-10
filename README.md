@@ -259,6 +259,12 @@ generator.generate_from_prd(prd_text, "tests/test_auto_register.py")
 
 ---
 
+## 👏 致谢 (Acknowledgments)
+
+本项目在开发过程中，其 DOM 脱水压缩提取思想、提示词设计和多模态视觉元素定位的灵感，部分借鉴或参考了开源社区优秀的同行者，特此致谢：
+- [**browser-use**](https://github.com/browser-use/browser-use) 
+- [**alibaba/page-agent**](https://github.com/alibaba/page-agent)
+
 ## 🤝 贡献与支持
 
 欢迎提交 Issue 和 Pull Request 来共同完善这个项目！
