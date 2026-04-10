@@ -48,3 +48,4 @@ tests/test_dustess.py
 tests/test_generated_*.py
 .healer_cache/
 .intent_cache/
+.PRIVATE_DEV_PLAN.md
