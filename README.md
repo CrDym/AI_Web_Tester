@@ -58,6 +58,7 @@ ai-web-tester/
 │       ├── driver.py           # 🚗 驱动层：封装 Playwright 动作
 │       ├── logger.py           # 📝 格式化全中文日志模块
 │       ├── pytest_plugin.py    # 📊 HTML 测试报告与 Pytest Hook
+│       ├── run_context.py      # 🔄 上下文环境：每次运行的独立记录与 Token 统计
 │       └── inject/
 │           └── extract_elements.js  # 🚀 核心：注入浏览器端，提取高压缩率的语义交互树
 ├── examples/                   # 示例演示代码
@@ -65,9 +66,11 @@ ai-web-tester/
 │   ├── test_demo.py            # 示例：混合编程测试（意图执行 + 智能断言 + 元素自愈）
 │   └── test_baidu_search.py    # 示例：由 AI 自动生成的自然语言测试脚本
 ├── tests/                      # 您的业务测试代码目录
+│   ├── conftest.py             # 业务测试全局配置
+│   ├── test_dustess.py         # 示例：完整的后台管理端自动化测试脚本
 │   └── test_template.py        # 模板：预置的空白测试用例，供您直接复制编写
 ├── logs/                       # 自动生成的日志与 HTML 报告存放处
-│   └── runs/                   # 每次运行产生的独立报告与日志文件
+│   └── runs/                   # 每次运行产生的独立报告、截图与日志文件夹
 └── TODO.md                     # 进阶开发计划与 Todo List
 ```
 
