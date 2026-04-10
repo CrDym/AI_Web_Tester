@@ -266,4 +266,4 @@ generator.generate_from_prd(prd_text, "tests/test_auto_register.py")
 
 ## 📄 License
 
-[MIT License](LICENSE) © 2026 Your Name
+[MIT License](LICENSE) © 2026 RockChe
