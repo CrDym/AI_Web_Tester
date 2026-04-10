@@ -59,16 +59,25 @@ def setup_logger():
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    if not run_dir:
-        try:
-            log_files = glob.glob(os.path.join(log_dir, "ai_tester_*.log"))
-            log_files.sort(key=os.path.getmtime)
-            if len(log_files) > 3:
-                files_to_delete = log_files[:-3]
-                for f in files_to_delete:
+    # 尝试清理旧日志文件，最多保留 0 个（因为如果有了 run_dir，全局的 ai_tester_*.log 完全不需要保留）
+    # 当还没有 run_dir 时（比如单脚本测试不走 pytest），保留最多 3 个
+    try:
+        global_log_dir = os.path.join(os.getcwd(), "logs")
+        log_files = glob.glob(os.path.join(global_log_dir, "ai_tester_*.log"))
+        log_files.sort(key=os.path.getmtime)
+        
+        # 如果当前在 run_dir 模式下，外层全局的 ai_tester_*.log 是没有价值的（都是 collection 产生的），可以直接全删
+        # 如果不是 run_dir 模式，则保留最近的 3 个
+        keep_count = 0 if run_dir else 3
+        
+        if len(log_files) > keep_count:
+            files_to_delete = log_files[:-keep_count] if keep_count > 0 else log_files
+            for f in files_to_delete:
+                # 排除正在使用的那个文件
+                if os.path.abspath(f) != os.path.abspath(log_file):
                     os.remove(f)
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     return logger
 
