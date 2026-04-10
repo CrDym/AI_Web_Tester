@@ -8,6 +8,30 @@ from PIL import Image, ImageDraw, ImageFont
 class PlaywrightDriver:
     def __init__(self, page):
         self.page = page
+        self.action_registry = self._init_action_registry()
+
+    def _init_action_registry(self) -> Dict[str, callable]:
+        """初始化内置的动作处理器注册表"""
+        return {
+            "click": self._action_click,
+            "double_click": self._action_double_click,
+            "right_click": self._action_right_click,
+            "type": self._action_type,
+            "hover": self._action_hover,
+            "select_option": self._action_select_option,
+            "drag_and_drop": self._action_drag_and_drop,
+            "press_key": self._action_press_key,
+            "scroll": self._action_scroll,
+            "wait": self._action_wait,
+            "done": self._action_done
+        }
+
+    def register_action(self, action_name: str, handler: callable):
+        """
+        向外暴露的注册接口，允许用户自定义业务特有动作。
+        handler 需要接受签名: handler(selector: str, value: str)
+        """
+        self.action_registry[action_name] = handler
 
     def get_dom_snapshot(self) -> Dict[str, Any]:
         """注入 JS 脚本提取当前视口内所有交互元素，支持 Iframe 穿透和多标签页环境"""
@@ -54,52 +78,81 @@ class PlaywrightDriver:
             
         target_locator = None
         if selector:
-            if self.page.locator(selector).count() > 0:
-                target_locator = self.page.locator(selector).first
-            else:
-                for frame in self.page.frames:
-                    if frame.locator(selector).count() > 0:
-                        target_locator = frame.locator(selector).first
-                        break
-
-            if not target_locator:
-                target_locator = self.page.locator(selector)
+            target_locator = self._get_locator(selector)
 
         for attempt in range(2):
             try:
-                if action == "click":
-                    target_locator.click()
-                elif action == "type":
-                    target_locator.fill(value)
-                elif action == "hover":
-                    target_locator.hover()
-                elif action == "select_option":
-                    target_locator.select_option(value)
-                elif action == "drag_and_drop":
-                    target_selector = f"[ai-id='{value}']"
-                    self.page.drag_and_drop(selector, target_selector)
-                elif action == "press_key":
-                    self.page.keyboard.press(value)
-                elif action == "scroll":
-                    self.page.mouse.wheel(0, 500)
-                elif action == "wait":
-                    self.page.wait_for_timeout(1000)
+                if action in self.action_registry:
+                    self.action_registry[action](target_locator, value)
                 else:
                     raise ValueError(f"Unknown action: {action}")
                 return
             except Exception as e:
                 msg = str(e)
                 if attempt == 0 and ("intercepts pointer events" in msg or "cf-modal-wrap" in msg):
-                    try:
-                        self.page.keyboard.press("Escape")
-                        self.page.wait_for_timeout(500)
-                        if self.page.locator(".cf-modal-close").count() > 0:
-                            self.page.locator(".cf-modal-close").first.click()
-                            self.page.wait_for_timeout(500)
-                    except Exception:
-                        pass
+                    self._handle_overlay_block()
                     continue
                 raise Exception(f"Action {action} failed on element {target_id}: {msg}")
+
+    def _get_locator(self, selector: str):
+        """跨 iframe 获取元素的 locator"""
+        if self.page.locator(selector).count() > 0:
+            return self.page.locator(selector).first
+        
+        for frame in self.page.frames:
+            if frame.locator(selector).count() > 0:
+                return frame.locator(selector).first
+                
+        return self.page.locator(selector)
+
+    def _handle_overlay_block(self):
+        """处理遮挡物的通用逻辑"""
+        try:
+            self.page.keyboard.press("Escape")
+            self.page.wait_for_timeout(500)
+            if self.page.locator(".cf-modal-close").count() > 0:
+                self.page.locator(".cf-modal-close").first.click()
+                self.page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+    # --- 内置动作处理器 ---
+    def _action_click(self, locator, value):
+        locator.click()
+
+    def _action_double_click(self, locator, value):
+        locator.dblclick()
+
+    def _action_right_click(self, locator, value):
+        locator.click(button="right")
+
+    def _action_type(self, locator, value):
+        locator.fill(value)
+
+    def _action_hover(self, locator, value):
+        locator.hover()
+
+    def _action_select_option(self, locator, value):
+        locator.select_option(value)
+
+    def _action_drag_and_drop(self, locator, value):
+        # value 是目标元素的 ai-id
+        target_selector = f"[ai-id='{value}']"
+        target_locator = self._get_locator(target_selector)
+        locator.drag_to(target_locator)
+
+    def _action_press_key(self, locator, value):
+        self.page.keyboard.press(value)
+
+    def _action_scroll(self, locator, value):
+        self.page.mouse.wheel(0, 500)
+
+    def _action_wait(self, locator, value):
+        self.page.wait_for_timeout(1000)
+
+    def _action_done(self, locator, value):
+        pass
+    # -----------------------
 
     def get_screenshot(self, elements_data: list = None) -> str:
         """
