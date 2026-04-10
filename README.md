@@ -66,7 +66,8 @@ ai-web-tester/
 │   └── test_baidu_search.py    # 示例：由 AI 自动生成的自然语言测试脚本
 ├── tests/                      # 您的业务测试代码目录
 │   └── test_template.py        # 模板：预置的空白测试用例，供您直接复制编写
-├── docs/                       # 自动生成的 HTML 报告存放处
+├── logs/                       # 自动生成的日志与 HTML 报告存放处
+│   └── runs/                   # 每次运行产生的独立报告与日志文件
 └── TODO.md                     # 进阶开发计划与 Todo List
 ```
 
@@ -128,7 +129,7 @@ OPENAI_API_KEY=github_pat_xxxxxx
   python3 main.py generate --text "打开必应搜索，输入人工智能，断言页面标题包含人工智能" --out tests/test_bing.py
   
   # 方式 2：使用已有的 PRD 文档生成测试代码
-  python3 main.py generate --prd docs/requirements/my_prd.md --out tests/test_my_feature.py
+  python3 main.py generate --prd requirements/my_prd.md --out tests/test_my_feature.py
   ```
 
 - **基于模板编写**: 您可以直接复制预置的空白模板，填入自己的自然语言指令进行测试。
@@ -137,7 +138,7 @@ OPENAI_API_KEY=github_pat_xxxxxx
   python3 main.py run tests/test_my_app.py
   ```
 
-运行结束后，您可以打开自动生成的 `docs/test_report.html` 查看精美的测试报告，或者在 `logs/` 目录下查看 AI 每一步决策的详细日志。
+运行结束后，您可以进入 `logs/runs/<运行时间>/` 目录下打开 `test_report.html` 查看精美的测试报告，或者查看 AI 每一步决策的详细日志和失败截图。
 
 ---
 
