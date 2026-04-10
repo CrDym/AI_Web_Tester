@@ -8,7 +8,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
 
 class SelfHealer:
-    def __init__(self, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.0, use_vision: bool = False, cache_dir: str = ".healer_cache"):
+    def __init__(self, model_name: str = None, temperature: float = 0.0, use_vision: bool = False, cache_dir: str = ".healer_cache"):
         self.use_vision = use_vision
         self.cache_dir = cache_dir
         
@@ -16,9 +16,11 @@ class SelfHealer:
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
             
+        final_model_name = model_name or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+
         # 独立的 LLM 实例，专用于自愈推理
         self.llm = ChatOpenAI(
-            model=model_name,
+            model=final_model_name,
             temperature=temperature,
             api_key=os.environ.get("OPENAI_API_KEY"),
             base_url=os.environ.get("OPENAI_API_BASE")

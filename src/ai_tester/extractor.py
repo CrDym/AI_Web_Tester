@@ -11,11 +11,12 @@ class DataExtractor:
     智能数据提取器 (Smart Data Extractor)
     基于页面 DOM 和多模态截图，通过自然语言指令提取结构化 JSON 数据。
     """
-    def __init__(self, driver: PlaywrightDriver, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.0, use_vision: bool = True):
+    def __init__(self, driver: PlaywrightDriver, model_name: str = None, temperature: float = 0.0, use_vision: bool = True):
         self.driver = driver
         self.use_vision = use_vision
+        final_model_name = model_name or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
         self.llm = ChatOpenAI(
-            model=model_name,
+            model=final_model_name,
             temperature=temperature,
             api_key=os.environ.get("OPENAI_API_KEY"),
             base_url=os.environ.get("OPENAI_API_BASE")
