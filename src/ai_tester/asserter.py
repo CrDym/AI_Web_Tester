@@ -6,7 +6,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
 
 class SmartAsserter:
-    def __init__(self, model_name: str = "gpt-4o-mini", temperature: float = 0.0, use_vision: bool = False):
+    def __init__(self, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.0, use_vision: bool = False):
         self.use_vision = use_vision
         self.llm = ChatOpenAI(
             model=model_name,

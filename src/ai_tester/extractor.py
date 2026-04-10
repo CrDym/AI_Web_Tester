@@ -11,7 +11,7 @@ class DataExtractor:
     智能数据提取器 (Smart Data Extractor)
     基于页面 DOM 和多模态截图，通过自然语言指令提取结构化 JSON 数据。
     """
-    def __init__(self, driver: PlaywrightDriver, model_name: str = "gpt-4o-mini", temperature: float = 0.0, use_vision: bool = True):
+    def __init__(self, driver: PlaywrightDriver, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.0, use_vision: bool = True):
         self.driver = driver
         self.use_vision = use_vision
         self.llm = ChatOpenAI(

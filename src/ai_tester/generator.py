@@ -6,7 +6,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
 
 class TestCaseGenerator:
-    def __init__(self, model_name: str = "gpt-4o", temperature: float = 0.2):
+    def __init__(self, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.2):
         self.llm = ChatOpenAI(
             model=model_name,
             temperature=temperature,

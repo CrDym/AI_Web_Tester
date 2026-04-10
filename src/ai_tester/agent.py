@@ -8,7 +8,7 @@ from langchain.prompts import PromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
 
 class AITesterAgent:
-    def __init__(self, driver: PlaywrightDriver, model_name: str = "gpt-4o-mini", temperature: float = 0.0, use_vision: bool = False, auto_vision: bool = True, interactive_mode: bool = False):
+    def __init__(self, driver: PlaywrightDriver, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.0, use_vision: bool = False, auto_vision: bool = True, interactive_mode: bool = False):
         self.driver = driver
         # 默认模式：是否始终强制开启多模态视觉
         self.use_vision = use_vision
@@ -156,8 +156,9 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
             generated_code.append(f"{indent}# ------------------------------------------------------------\n")
             
             # 将 agent.step 那行注释掉
+            # 改进正则，处理 `success = agent.step(...)` 的情况
             if not lines[step_line_idx].strip().startswith('#'):
-                lines[step_line_idx] = lines[step_line_idx].replace('agent.step', '# agent.step', 1)
+                lines[step_line_idx] = re.sub(r'(^|\s)([\w\s,]*=\s*)?agent\.step', r'\1# \2agent.step', lines[step_line_idx], count=1)
                 
             # 插入生成的代码
             lines.insert(step_line_idx + 1, "".join(generated_code))
