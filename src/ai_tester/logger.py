@@ -11,10 +11,6 @@ def setup_logger():
     """
     logger = logging.getLogger("ai_tester")
     
-    # 如果已经配置过，直接返回避免重复添加 handler
-    if logger.handlers:
-        return logger
-        
     logger.setLevel(logging.INFO)
 
     # 创建格式化器
@@ -22,37 +18,57 @@ def setup_logger():
         '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
     )
 
-    # 1. 控制台处理器
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # 为了防止多次调用产生重复的 Console handler
+    existing_console = any(isinstance(h, logging.StreamHandler) for h in logger.handlers)
+    if not existing_console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
-    # 2. 文件处理器
-    # 确保 logs 目录存在
-    log_dir = os.path.join(os.getcwd(), "logs")
+    run_dir = os.environ.get("AI_TESTER_RUN_DIR")
+    if run_dir:
+        log_dir = run_dir
+        log_file = os.path.join(log_dir, "ai_tester.log")
+    else:
+        log_dir = os.path.join(os.getcwd(), "logs")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_file = os.path.join(log_dir, f"ai_tester_{timestamp}.log")
+
     os.makedirs(log_dir, exist_ok=True)
-    
-    # 每次测试生成一个新的带有时间戳的日志文件
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = os.path.join(log_dir, f"ai_tester_{timestamp}.log")
-    
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
 
-    # 3. 清理旧日志文件，最多保留 10 个
-    try:
-        log_files = glob.glob(os.path.join(log_dir, "ai_tester_*.log"))
-        # 按修改时间排序，最旧的在前面
-        log_files.sort(key=os.path.getmtime)
-        
-        # 如果超过 10 个，删除最旧的
-        if len(log_files) > 10:
-            files_to_delete = log_files[:-10]
-            for f in files_to_delete:
-                os.remove(f)
-    except Exception as e:
-        print(f"⚠️ 清理旧日志文件时发生异常: {e}")
+    # 在添加新的 FileHandler 之前，先移除旧的 FileHandler，避免由于多次 setup 导致多个文件被同时写入
+    existing_file_handlers = [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
+    for h in existing_file_handlers:
+        # 如果当前已有指向同一个文件的 Handler，直接保留即可
+        if getattr(h, "baseFilename", None) == os.path.abspath(log_file):
+            continue
+        try:
+            logger.removeHandler(h)
+            h.close()
+        except Exception:
+            pass
+
+    # 检查是否已经包含了当前这个目标文件的 Handler
+    already_has_current_file = any(
+        isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == os.path.abspath(log_file)
+        for h in logger.handlers
+    )
+
+    if not already_has_current_file:
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    if not run_dir:
+        try:
+            log_files = glob.glob(os.path.join(log_dir, "ai_tester_*.log"))
+            log_files.sort(key=os.path.getmtime)
+            if len(log_files) > 3:
+                files_to_delete = log_files[:-3]
+                for f in files_to_delete:
+                    os.remove(f)
+        except Exception:
+            pass
 
     return logger
 
