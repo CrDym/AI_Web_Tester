@@ -11,6 +11,10 @@ test_results = []
 def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
+    
+    # 将 report 挂载到 item 上，方便 fixture 读取测试结果
+    setattr(item, "rep_" + report.when, report)
+    
     if report.when == "call":
         # 收集每个测试用例的结果
         test_results.append({
