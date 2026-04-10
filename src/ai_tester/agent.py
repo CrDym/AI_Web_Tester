@@ -378,17 +378,17 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
                 # 等待页面稳定
                 self.driver.page.wait_for_timeout(1000)
                 
-                if consecutive_failures >= 4:
+                if consecutive_failures >= 3:
                     logger.error("❌ 连续失败/死循环次数过多，自动终止当前意图的探索。")
-                    break
+                    return False
             except Exception as e:
                 logger.warning(f"⚠️ 动作执行失败: {str(e)}")
                 action_history.append(f"执行失败: {action} 于 [{target_id}] - 错误: {str(e)}")
                 consecutive_failures += 1
                 
-                if consecutive_failures >= 4:
+                if consecutive_failures >= 3:
                     logger.error("❌ 连续执行失败次数过多，自动终止当前意图的探索。")
-                    break
+                    return False
                 # 在真实框架中，这里可以触发“自愈（Self-Healing）”机制或抛出异常
                 
         logger.error(f"❌ 达到最大步数 ({max_steps}) 限制，意图未能完成: '{intent}'")
