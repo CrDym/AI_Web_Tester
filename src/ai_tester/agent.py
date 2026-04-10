@@ -31,35 +31,21 @@ class AITesterAgent:
             base_url=os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
         )
 
-        self.system_prompt = """
-You are an intelligent Web Automation Testing Agent.
-You are given a compressed DOM tree (Accessibility Tree) containing only interactive elements on the page, each marked with an ID like [1].
-You may also be given a screenshot of the current page if vision is enabled.
-You are also given a history of your previous actions in this task.
+        self.system_prompt = self._load_system_prompt()
 
-Your goal is to execute the user's intent step by step. Look at the history, the current DOM, and the screenshot (if provided) to decide the *next* logical action.
-DO NOT repeat the same action if it was already performed successfully.
-
-If you are using the screenshot, you will see interactive elements surrounded by RED BOXES with RED LABELS. 
-The number inside the red label is the EXACT `target_id` you must use in your JSON action.
-For example, if you see a button with a red box labeled "[14]", you MUST use `{"action": "click", "target_id": "14"}`.
-
-Choose exactly one of the following actions:
-1. `{"action": "click", "target_id": "1"}` - Click an element. MUST use the numeric ID.
-2. `{"action": "type", "target_id": "2", "value": "hello"}` - Type text into an input field. MUST use the numeric ID.
-3. `{"action": "hover", "target_id": "3"}` - Hover over an element. MUST use the numeric ID.
-4. `{"action": "select_option", "target_id": "4", "value": "option_value"}` - Select an option. MUST use the numeric ID.
-5. `{"action": "drag_and_drop", "target_id": "5", "value": "6"}` - Drag element 5 to 6. MUST use the numeric ID.
-6. `{"action": "press_key", "target_id": "null", "value": "Enter"}` - Press a keyboard key.
-7. `{"action": "scroll", "target_id": "null"}` - Scroll the page.
-8. `{"action": "wait", "target_id": "null"}` - Wait for 1 second.
-9. `{"action": "done", "target_id": "null"}` - Intent is completed.
-
-CRITICAL: `target_id` MUST be the exact numeric ID found inside the brackets `[]` in the provided DOM tree. Do NOT use string names or HTML ids.
-Note: You are only seeing elements currently visible in the viewport. If you cannot find the element you need, you should return `{"action": "scroll", "target_id": "null"}` to look further down.
-If the element you want to interact with is inside a scrollable list or dropdown, you may need to use `{"action": "scroll"}` to find it.
-Output strictly in JSON format. Do not include markdown backticks like ```json.
-"""
+    def _load_system_prompt(self) -> str:
+        """加载系统提示词模板，支持外部传入或读取默认文件"""
+        prompt_path = os.environ.get("AI_TESTER_AGENT_PROMPT_PATH")
+        if not prompt_path:
+            # 默认读取同目录下的 prompts/agent_system_prompt.txt
+            prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', 'agent_system_prompt.txt')
+        
+        try:
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        except Exception as e:
+            logger.warning(f"⚠️ 无法加载系统提示词文件 {prompt_path}: {e}，将使用内置的 Fallback 提示词。")
+            return "You are a Web Automation Agent. Output JSON format."
 
     def _build_tree_str(self, page_data: Dict[str, Any]) -> str:
         """将提取的字典转换为大模型易读且极度省 Token 的 YAML/Markdown 混合字符串"""
@@ -149,12 +135,21 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
                 # 处理不同类型的动作
                 if action == "click":
                     generated_code.append(f"{indent}page.click({selector_lit})\n")
+                elif action == "double_click":
+                    generated_code.append(f"{indent}page.dblclick({selector_lit})\n")
+                elif action == "right_click":
+                    generated_code.append(f"{indent}page.click({selector_lit}, button='right')\n")
                 elif action == "type":
                     generated_code.append(f"{indent}page.fill({selector_lit}, {value_lit})\n")
                 elif action == "hover":
                     generated_code.append(f"{indent}page.hover({selector_lit})\n")
                 elif action == "select_option":
                     generated_code.append(f"{indent}page.select_option({selector_lit}, {value_lit})\n")
+                elif action == "drag_and_drop":
+                    # value is target_id to drop on
+                    target_selector = f"[ai-id='{value}']"
+                    if target_selector:
+                        generated_code.append(f"{indent}page.drag_and_drop({selector_lit}, {json.dumps(target_selector)})\n")
                 elif action == "scroll":
                     generated_code.append(f"{indent}page.mouse.wheel(0, 500)\n")
                 elif action == "wait":
