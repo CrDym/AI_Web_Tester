@@ -259,6 +259,12 @@ generator.generate_from_prd(prd_text, "tests/test_auto_register.py")
 
 ---
 
+## 👏 Acknowledgments
+
+During the development of this project, the concepts of DOM dehydration and extraction, prompt design, and multi-modal visual element localization were partially inspired by and refer to excellent peers in the open-source community. Special thanks to:
+- [**browser-use**](https://github.com/browser-use/browser-use) 
+- [**alibaba/page-agent**](https://github.com/alibaba/page-agent)
+
 ## 🤝 Contribution & Support
 
 Issues and Pull Requests are welcome to improve this project together!
