@@ -366,7 +366,7 @@ Output strictly in JSON format. Do not include markdown backticks like ```json.
 
                 # 检查是否陷入死循环 (比如连续3次点击同一个元素却没有完成意图)
                 if len(action_history) >= 2 and all(record.split(" (⚠️")[0] == action_record for record in action_history[-2:]):
-                    consecutive_failures += 1
+                    consecutive_failures += 1.5 # 加大死循环的惩罚力度
                     logger.warning(f"⚠️ 检测到大模型可能陷入重复动作的死循环 ({action_record})")
                     action_record += " (⚠️ 警告: 该动作未产生预期效果，陷入死循环！请尝试滚动页面、更换策略或返回 done)"
                 else:
