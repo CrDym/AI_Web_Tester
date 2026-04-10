@@ -41,6 +41,11 @@ class PlaywrightDriver:
         # 始终获取最前端的活跃标签页，以支持多 Tab 环境
         if len(self.page.context.pages) > 0:
             active_page = self.page.context.pages[-1]
+            if active_page != self.page:
+                try:
+                    active_page.wait_for_load_state("domcontentloaded", timeout=3000)
+                except Exception:
+                    pass
             # 同步更新 driver 内部引用的 page
             self.page = active_page
         else:
@@ -52,12 +57,29 @@ class PlaywrightDriver:
         # 遍历当前页面的所有 Frame (主页面本身也是第一个 frame，后续的是各种 Iframe)
         for frame in active_page.frames:
             try:
+                # 尝试获取 iframe 在视口中的偏移量，以修正视觉红框坐标
+                frame_offset_x = 0
+                frame_offset_y = 0
+                if frame.parent_frame:
+                    try:
+                        frame_element = frame.frame_element()
+                        bbox = frame_element.bounding_box()
+                        if bbox:
+                            frame_offset_x = bbox['x']
+                            frame_offset_y = bbox['y']
+                    except Exception:
+                        pass
+                        
                 # 给每个 frame 注入抽取脚本
                 frame.evaluate(script)
                 # 执行抽取，并传入当前的起始 ID 防止跨 frame 的 ID 冲突
                 result = frame.evaluate(f"() => window.extractInteractiveElements({current_id})")
                 if result and 'elements' in result:
                     elements = result.get('elements', [])
+                    for el in elements:
+                        if 'bbox' in el and el['bbox']:
+                            el['bbox']['x'] += frame_offset_x
+                            el['bbox']['y'] += frame_offset_y
                     all_elements.extend(elements)
                     current_id += len(elements)
             except Exception:
@@ -82,14 +104,20 @@ class PlaywrightDriver:
 
         for attempt in range(2):
             try:
+                force = (attempt == 1)
                 if action in self.action_registry:
-                    self.action_registry[action](target_locator, value)
+                    import inspect
+                    sig = inspect.signature(self.action_registry[action])
+                    if 'force' in sig.parameters:
+                        self.action_registry[action](target_locator, value, force=force)
+                    else:
+                        self.action_registry[action](target_locator, value)
                 else:
                     raise ValueError(f"Unknown action: {action}")
                 return
             except Exception as e:
                 msg = str(e)
-                if attempt == 0 and ("intercepts pointer events" in msg or "cf-modal-wrap" in msg):
+                if attempt == 0 and ("intercepts pointer events" in msg or "cf-modal-wrap" in msg or "not visible" in msg):
                     self._handle_overlay_block()
                     continue
                 raise Exception(f"Action {action} failed on element {target_id}: {msg}")
@@ -117,35 +145,41 @@ class PlaywrightDriver:
             pass
 
     # --- 内置动作处理器 ---
-    def _action_click(self, locator, value):
-        locator.click()
+    def _action_click(self, locator, value, force=False):
+        locator.click(force=force)
 
-    def _action_double_click(self, locator, value):
-        locator.dblclick()
+    def _action_double_click(self, locator, value, force=False):
+        locator.dblclick(force=force)
 
-    def _action_right_click(self, locator, value):
-        locator.click(button="right")
+    def _action_right_click(self, locator, value, force=False):
+        locator.click(button="right", force=force)
 
-    def _action_type(self, locator, value):
-        locator.fill(value)
+    def _action_type(self, locator, value, force=False):
+        locator.fill(value, force=force)
 
-    def _action_hover(self, locator, value):
-        locator.hover()
+    def _action_hover(self, locator, value, force=False):
+        locator.hover(force=force)
 
-    def _action_select_option(self, locator, value):
-        locator.select_option(value)
+    def _action_select_option(self, locator, value, force=False):
+        locator.select_option(value, force=force)
 
-    def _action_drag_and_drop(self, locator, value):
+    def _action_drag_and_drop(self, locator, value, force=False):
         # value 是目标元素的 ai-id
         target_selector = f"[ai-id='{value}']"
         target_locator = self._get_locator(target_selector)
-        locator.drag_to(target_locator)
+        locator.drag_to(target_locator, force=force)
 
     def _action_press_key(self, locator, value):
         self.page.keyboard.press(value)
 
     def _action_scroll(self, locator, value):
-        self.page.mouse.wheel(0, 500)
+        if locator:
+            locator.scroll_into_view_if_needed()
+        else:
+            if value == "up":
+                self.page.mouse.wheel(0, -500)
+            else:
+                self.page.mouse.wheel(0, 500)
 
     def _action_wait(self, locator, value):
         self.page.wait_for_timeout(1000)
