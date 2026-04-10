@@ -8,7 +8,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
 
 class SelfHealer:
-    def __init__(self, model_name: str = "gpt-4o-mini", temperature: float = 0.0, use_vision: bool = False, cache_dir: str = ".healer_cache"):
+    def __init__(self, model_name: str = "doubao-seed-2-0-lite-260215", temperature: float = 0.0, use_vision: bool = False, cache_dir: str = ".healer_cache"):
         self.use_vision = use_vision
         self.cache_dir = cache_dir
         
