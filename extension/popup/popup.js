@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateUI() {
         chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
-            if (res.isRecording) {
+            if (res && res.isRecording) {
                 statusText.textContent = "录制中...";
                 statusText.className = "recording";
                 startBtn.disabled = true;
@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
             }
-            actionCount.textContent = res.actionCount;
+            actionCount.textContent = res ? res.actionCount : 0;
         });
     }
 
@@ -30,7 +30,11 @@ document.addEventListener('DOMContentLoaded', () => {
     stopBtn.addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: "STOP_RECORDING" }, (res) => {
             updateUI();
-            generatePythonScript(res.actions);
+            if (res && res.actions) {
+                generatePythonScript(res.actions);
+            } else {
+                alert("获取录制数据失败。");
+            }
         });
     });
 

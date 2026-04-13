@@ -3,9 +3,15 @@ let isRecording = false;
 
 // 轮询同步后台状态
 setInterval(() => {
-    chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
-        if (res) isRecording = res.isRecording;
-    });
+    try {
+        chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
+            if (res && res.isRecording !== undefined) {
+                isRecording = res.isRecording;
+            }
+        });
+    } catch (e) {
+        // 如果插件重新加载了，连接可能会断开
+    }
 }, 1000);
 
 function getCssSelector(el) {
