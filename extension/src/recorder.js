@@ -47,83 +47,43 @@ async function captureSnapshot(element) {
     }
 }
 
-function showIntentPrompt(actionType, targetElement, value = null) {
-    return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.id = "ai-tester-overlay";
-        
-        const title = document.createElement('h4');
-        title.textContent = `动作: ${actionType.toUpperCase()} - 请输入操作意图`;
-        
-        const input = document.createElement('input');
-        input.type = "text";
-        input.placeholder = "例如: 点击登录按钮 / 输入用户名";
-        
-        const btn = document.createElement('button');
-        btn.textContent = "保存动作";
-        
-        overlay.appendChild(title);
-        overlay.appendChild(input);
-        overlay.appendChild(btn);
-        document.body.appendChild(overlay);
-        
-        targetElement.classList.add('ai-tester-highlight');
-        input.focus();
-
-        // 支持按回车键保存
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                btn.click();
-            }
-        });
-
-        btn.addEventListener('click', async (event) => {
-            // 阻止点击事件冒泡，防止触发全局的点击拦截
-            event.preventDefault();
-            event.stopPropagation();
-            
-            const intent = input.value.trim() || `执行 ${actionType}`;
-            targetElement.classList.remove('ai-tester-highlight');
-            document.body.removeChild(overlay);
-            
-            const selector = getCssSelector(targetElement);
-            const snapshot = await captureSnapshot(targetElement);
-            
-            resolve({
-                type: actionType,
-                selector: selector,
-                value: value,
-                intent: intent,
-                snapshot: snapshot,
-                url: window.location.href
-            });
-        });
-    });
-}
+// 防抖计时器，防止短时间内触发多次记录
+let lastActionTime = 0;
+const ACTION_DEBOUNCE_MS = 500;
 
 document.addEventListener('click', async (e) => {
     if (!isRecording) return;
-    // 忽略点击录制器弹窗本身
+    
+    // 忽略我们自己的浮层（虽然现在移除了，但为了安全保留逻辑）
     if (e.target.closest('#ai-tester-overlay')) return;
     
-    // 拦截点击事件，等待用户输入意图
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
+    // 防抖：如果点击太快，忽略
+    const now = Date.now();
+    if (now - lastActionTime < ACTION_DEBOUNCE_MS) return;
+    lastActionTime = now;
     
-    // 保存真实的点击目标
+    // 提取元素信息，但不阻断用户原生点击！
     const target = e.target;
+    const selector = getCssSelector(target);
     
-    const action = await showIntentPrompt("click", target);
-    chrome.runtime.sendMessage({ type: "ADD_ACTION", action: action });
+    // 给元素闪烁一下红框，提示用户“记录成功”
+    target.classList.add('ai-tester-highlight');
+    setTimeout(() => {
+        target.classList.remove('ai-tester-highlight');
+    }, 500);
     
-    // 录制完成后，释放记录状态一瞬间，让真实的点击通过，然后再恢复记录状态
-    // 这样就不会阻断用户的业务流程
-    const wasRecording = isRecording;
-    isRecording = false;
-    target.click();
-    isRecording = wasRecording;
+    // 异步去截图并发送，绝对不卡主线程
+    captureSnapshot(target).then(snapshot => {
+        const action = {
+            type: "click",
+            selector: selector,
+            value: null,
+            intent: `点击 ${target.tagName.toLowerCase()}`, // 默认意图，后续让用户在插件面板里统一补充
+            snapshot: snapshot,
+            url: window.location.href
+        };
+        chrome.runtime.sendMessage({ type: "ADD_ACTION", action: action });
+    });
     
 }, true); // 使用捕获阶段
 
@@ -131,6 +91,24 @@ document.addEventListener('change', async (e) => {
     if (!isRecording) return;
     if (e.target.closest('#ai-tester-overlay')) return;
     
-    const action = await showIntentPrompt("input", e.target, e.target.value);
-    chrome.runtime.sendMessage({ type: "ADD_ACTION", action: action });
+    const target = e.target;
+    const selector = getCssSelector(target);
+    const value = target.value;
+    
+    target.classList.add('ai-tester-highlight');
+    setTimeout(() => {
+        target.classList.remove('ai-tester-highlight');
+    }, 500);
+    
+    captureSnapshot(target).then(snapshot => {
+        const action = {
+            type: "input",
+            selector: selector,
+            value: value,
+            intent: `在 ${target.tagName.toLowerCase()} 中输入 ${value}`, 
+            snapshot: snapshot,
+            url: window.location.href
+        };
+        chrome.runtime.sendMessage({ type: "ADD_ACTION", action: action });
+    });
 }, true);
