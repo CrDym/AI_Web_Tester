@@ -70,12 +70,18 @@ def pytest_runtest_makereport(item, call):
         totals = run_context.get_token_totals(nodeid)
         events = run_context.get_events(nodeid)
         steps_html = ""
+        last_debug_screenshot = None
+        
         if events:
             step_rows = ""
             for e in events:
                 ts = datetime.fromtimestamp(e.get("ts", 0)).strftime("%H:%M:%S")
                 kind = html.escape(str(e.get("kind", "")))
                 msg = html.escape(str(e.get("message", "")))
+                if kind == "debug_screenshot":
+                    # 记录最后一个视觉带框截图
+                    last_debug_screenshot = str(e.get("message", ""))
+                    
                 usage = e.get("token_usage") or {}
                 tokens = ""
                 if usage:
@@ -84,7 +90,7 @@ def pytest_runtest_makereport(item, call):
                 <tr class="border-t">
                     <td class="py-2 pr-4 align-top text-gray-500 text-xs">{ts}</td>
                     <td class="py-2 pr-4 align-top text-gray-700 text-xs">{kind}</td>
-                    <td class="py-2 pr-4 align-top text-gray-800 text-sm">{msg}</td>
+                    <td class="py-2 pr-4 align-top text-gray-800 text-sm break-all">{msg}</td>
                     <td class="py-2 align-top text-gray-500 text-xs whitespace-nowrap">{tokens}</td>
                 </tr>
                 """
@@ -121,6 +127,7 @@ def pytest_runtest_makereport(item, call):
             "token_prompt": totals.get("prompt_tokens", 0),
             "token_completion": totals.get("completion_tokens", 0),
             "steps_html": steps_html,
+            "last_debug_screenshot": last_debug_screenshot
         })
 
 def pytest_sessionfinish(session, exitstatus):
@@ -133,13 +140,57 @@ def pytest_sessionfinish(session, exitstatus):
     
     # 渲染 HTML 内容
     rows_html = ""
+    run_dir = os.environ.get("AI_TESTER_RUN_DIR", "")
+    
     for r in test_results:
         status_color = "green" if r["status"] == "passed" else ("red" if r["status"] == "failed" else "gray")
         status_text = r["status"].upper()
         
-        error_html = f"<div class='error-log'>{r['error'][:200]}...</div>" if r["error"] else ""
+        error_html = f"<div class='error-log'>{r['error'][:500]}...</div>" if r["error"] else ""
         token_html = f"<div class='text-xs text-gray-500 mt-2'>Token: 总计 {r.get('token_total', 0)} (P {r.get('token_prompt', 0)} / C {r.get('token_completion', 0)})</div>"
         
+        # 失败时尝试附上带红框的最后一次视觉截图
+        screenshot_html = ""
+        if r["status"] == "failed":
+            debug_shot = r.get("last_debug_screenshot")
+            fail_shot = os.path.join(run_dir, "failure_screenshots", f"{r['name']}_failed.png")
+            
+            shots = []
+            if debug_shot and os.path.exists(debug_shot):
+                try:
+                    rel_debug = os.path.relpath(debug_shot, run_dir)
+                    shots.append(f"""
+                    <div class="flex-1">
+                        <div class="text-sm text-gray-600 mb-1">🤖 AI 最后分析视角 (带标注):</div>
+                        <a href="{rel_debug}" target="_blank">
+                            <img src="{rel_debug}" class="border border-red-300 rounded max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity" alt="Debug Screenshot" />
+                        </a>
+                    </div>
+                    """)
+                except Exception:
+                    pass
+                    
+            if fail_shot and os.path.exists(fail_shot):
+                try:
+                    rel_fail = os.path.relpath(fail_shot, run_dir)
+                    shots.append(f"""
+                    <div class="flex-1">
+                        <div class="text-sm text-gray-600 mb-1">💥 最终失败瞬间截图:</div>
+                        <a href="{rel_fail}" target="_blank">
+                            <img src="{rel_fail}" class="border border-red-300 rounded max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity" alt="Failure Screenshot" />
+                        </a>
+                    </div>
+                    """)
+                except Exception:
+                    pass
+            
+            if shots:
+                screenshot_html = f"""
+                <div class="mt-4 flex gap-4 overflow-x-auto bg-gray-50 p-4 rounded border border-gray-200">
+                    {"".join(shots)}
+                </div>
+                """
+
         rows_html += f"""
         <div class="card border-l-4 border-{status_color}-500 shadow-sm p-4 mb-4 bg-white rounded">
             <div class="flex justify-between items-center">
@@ -156,6 +207,7 @@ def pytest_sessionfinish(session, exitstatus):
                 </div>
             </div>
             {error_html}
+            {screenshot_html}
             {r.get('steps_html', '')}
         </div>
         """
