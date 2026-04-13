@@ -1,0 +1,22 @@
+body {
+  width: 250px;
+  font-family: Arial, sans-serif;
+  padding: 10px;
+}
+.status, .actions {
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+#status-text {
+  font-weight: bold;
+  color: red;
+}
+#status-text.recording {
+  color: green;
+}
+.buttons button {
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 8px;
+  cursor: pointer;
+}

@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "AI Tester Recorder",
+  "version": "1.0",
+  "description": "录制带有自然语言意图的 UI 交互，为 AI Web Tester 生成测试脚本",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/html2canvas.min.js", "src/recorder.js"],
+      "css": ["src/recorder.css"]
+    }
+  ]
+}

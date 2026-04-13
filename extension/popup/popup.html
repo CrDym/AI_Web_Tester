@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h3>AI Tester 录制器</h3>
+  <div class="status">
+    状态: <span id="status-text">已停止</span>
+  </div>
+  <div class="actions">
+    已录制动作: <span id="action-count">0</span>
+  </div>
+  <div class="buttons">
+    <button id="start-btn">开始录制</button>
+    <button id="stop-btn" disabled>停止并生成代码</button>
+    <button id="clear-btn">清空</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

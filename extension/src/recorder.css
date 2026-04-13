@@ -1,0 +1,19 @@
+/* extension/src/recorder.css */
+#ai-tester-overlay {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: white;
+    border: 2px solid #1890ff;
+    padding: 15px;
+    z-index: 2147483647; /* 最高层级 */
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border-radius: 8px;
+    font-family: sans-serif;
+    width: 300px;
+}
+#ai-tester-overlay h4 { margin: 0 0 10px 0; font-size: 14px; color: #333; }
+#ai-tester-overlay input { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+#ai-tester-overlay button { background: #1890ff; color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; width: 100%; }
+#ai-tester-overlay button:hover { background: #40a9ff; }
+.ai-tester-highlight { outline: 2px solid red !important; }
