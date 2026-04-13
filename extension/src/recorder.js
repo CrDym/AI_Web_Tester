@@ -70,7 +70,19 @@ function showIntentPrompt(actionType, targetElement, value = null) {
         targetElement.classList.add('ai-tester-highlight');
         input.focus();
 
-        btn.addEventListener('click', async () => {
+        // 支持按回车键保存
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                btn.click();
+            }
+        });
+
+        btn.addEventListener('click', async (event) => {
+            // 阻止点击事件冒泡，防止触发全局的点击拦截
+            event.preventDefault();
+            event.stopPropagation();
+            
             const intent = input.value.trim() || `执行 ${actionType}`;
             targetElement.classList.remove('ai-tester-highlight');
             document.body.removeChild(overlay);
@@ -98,11 +110,21 @@ document.addEventListener('click', async (e) => {
     // 拦截点击事件，等待用户输入意图
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
     
-    const action = await showIntentPrompt("click", e.target);
+    // 保存真实的点击目标
+    const target = e.target;
+    
+    const action = await showIntentPrompt("click", target);
     chrome.runtime.sendMessage({ type: "ADD_ACTION", action: action });
     
-    // 注意：为了演示简单，录制阶段暂时阻断了真实的点击跳转，如果需要可以通过 JS 手动触发点击恢复执行
+    // 录制完成后，释放记录状态一瞬间，让真实的点击通过，然后再恢复记录状态
+    // 这样就不会阻断用户的业务流程
+    const wasRecording = isRecording;
+    isRecording = false;
+    target.click();
+    isRecording = wasRecording;
+    
 }, true); // 使用捕获阶段
 
 document.addEventListener('change', async (e) => {
