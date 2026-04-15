@@ -52,6 +52,7 @@ tests/test_generated_*.py
 tests/run_history/
 tests/suite_history/
 tests/recorded_scripts/
+tests/
 frontend/node_modules/
 frontend/dist/
 .pytest_cache/

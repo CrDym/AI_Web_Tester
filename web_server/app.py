@@ -1205,7 +1205,7 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
     
     try:
         process = await asyncio.create_subprocess_exec(
-            "pytest", "-q", "-s", "--tb=short", "--disable-warnings", script_path,
+            "pytest", "-q", "-s", "--tb=short", "--disable-warnings", "-p", "ai_tester.pytest_fixtures", script_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=env,
