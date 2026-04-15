@@ -2,16 +2,16 @@
 
 # 🤖 AI Web Tester
 
-**基于 LLM 驱动的下一代 Web 自动化测试工程框架**
+**基于大模型驱动的新一代 Web 自动化测试工作台**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Playwright](https://img.shields.io/badge/Playwright-enabled-green.svg)](https://playwright.dev/python/)
 [![LangChain](https://img.shields.io/badge/LangChain-powered-orange.svg)](https://python.langchain.com/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-*让大模型接管脆弱的 CSS 选择器，用自然语言意图驱动你的端到端 (E2E) 测试。*
+*让 AI 接管脆弱的 CSS 选择器，用自然语言意图驱动你的端到端 (E2E) 测试。*
 
-[English Documentation](README_EN.md) · [特性](#-核心特性) · [快速开始](#-快速开始) · [架构设计](#-架构设计) · [最佳实践](#-最佳实践) · [使用示例](#-使用示例)
+[English Documentation](README_EN.md) · [核心特性](#-核心特性) · [快速开始](#-快速开始) · [架构设计](#-架构设计) · [工作流演示](#-工作流演示)
 
 </div>
 
@@ -19,243 +19,121 @@
 
 ## 💡 为什么需要 AI Web Tester？
 
-在传统的 Web UI 自动化测试（如 Selenium, 原生 Playwright）中，我们通常面临三大痛点：
-1. **编写成本高**：需要手动检查 DOM 树，编写复杂的 XPath 或 CSS Selector。
+在传统的 Web UI 自动化测试（如 Selenium, 原生 Playwright）中，我们通常面临两大痛点：
+1. **编写成本高**：需要频繁查看控制台、找元素，手动编写维护复杂的 XPath 或 CSS Selector。
 2. **脚本极其脆弱**：前端 UI 的一次小重构（甚至只是改了 Tailwind 的 ClassName），就会导致大面积的 `NoSuchElementException`，维护成本极高。
-3. **断言太死板**：只能进行精确的字符串匹配，难以进行“语义层面”的模糊断言。
 
-**AI Web Tester** 通过引入大语言模型 (如 GPT-4o, Claude 3.5, DeepSeek 等) 作为“大脑”，实现了从 **“指令驱动”向“意图驱动”** 的测试范式跃迁。
+**AI Web Tester** 是一个 **B/S 架构** 的现代化测试工作台。它引入了视觉大模型 (如 GPT-4o, Claude 3.5, DeepSeek 等) 作为“大脑”，实现了从 **“找元素”向“表达意图”** 的测试范式跃迁。
 
 ---
 
 ## ✨ 核心特性
 
-- 🗣️ **意图驱动执行 (Intent-Driven)**：无需编写选择器，直接使用 `agent.step("在搜索框输入 iPhone 并点击搜索")`，AI 会自动寻找目标并执行动作。
-- 👁️ **多模态视觉与红框标注 (Visual Bounding Box)**：完美吸收 Midscene.js 的精髓。支持截取当前页面并自动在元素上绘制带有 ID 的红框，结合 GPT-4o 视觉能力，精准处理复杂嵌套卡片和动态 UI。
-- 🚑 **底层元素自愈 (Self-Healing)**：完美兼容现有传统脚本。当原本写死的 CSS 选择器失效时，拦截错误并触发大模型“看懂”当前页面，自动找到新的元素位置继续执行，测试不再中断！
-- ⚡ **意图缓存回放 (Intent Cache & Replay)**：首次执行意图时记录原生 CSS 选择器操作，后续执行秒级缓存回放，**0 Token 消耗，毫秒级运行**。只有重放失败时才唤醒大模型重新探索。
-- ✍️ **自动代码回写 (Auto Code Rewrite)**：当 AI 成功探索出一条执行路径后，会自动定位调用它的 Python 测试文件，将原生的 Playwright 代码（如 `page.click`, `page.fill`）写回文件并注释掉大模型调用代码，彻底消除对 AI 的依赖！
-- 📝 **PRD 到代码全自动生成 (Test Generation)**：传入一段自然语言的产品需求文档 (PRD)，框架自动输出带有 Playwright 和 AI 驱动的 pytest 规范脚本。
-- 🔍 **智能数据提取 (Data Extractor)**：内置 `DataExtractor`，基于视觉和 DOM，用自然语言快速将页面上复杂的表格或卡片列表转换为结构化的 JSON 数据。
-- 🧠 **语义智能断言 (Smart Assertion)**：告别死板的 `assert "success" in text`。使用 `asserter.evaluate(dom, "用户已成功登录且看到了欢迎横幅", screenshot)`。
-- 📉 **极致 Token 压缩与视口裁剪 (Viewport Pruning)**：内置底层的 JS 注入引擎，仅提取当前视口内可见元素，精简属性输出。在非视觉模式下单步操作仅需不到 1000 Token。
-- 📊 **现代化测试报告与日志管理**：零配置自动生成基于 Tailwind CSS 的美观 HTML 测试报告。日志支持自动轮转保留，用例失败时自动生成现场截图。
+- 🎮 **现代化的 Web 控制台**：零配置的 React 前端面板。支持用例管理、多环境配置、可视化拖拽编排测试步骤。
+- 🗣️ **意图驱动 (Intent-Driven)**：你可以直接在编辑器中输入“点击右上角的登录按钮”或“在搜索框输入 iPhone”，无需手写任何选择器。
+- 🚑 **AI 智能自愈引擎 (Self-Healing)**：这是框架的杀手锏。当原本录制的 CSS 选择器因为页面重构失效时，底层会自动拦截异常，并截取当前页面 DOM 与画面发送给大模型。AI 会根据你的“意图描述”重新寻找元素，并继续执行测试。**测试不再中断！**
+- 🛡️ **自愈选择器评分与审核回写**：AI 自愈时会为候选选择器进行稳定性打分（优先采用 `data-testid` / `role` / `aria` 等）。高分选择器可写入本地缓存；在 Web 端可进入 **自愈审计大盘**，对比“自愈前/后”截图并一键 **批准更新** 将 selector 写回用例（支持原 selector 为空时按意图定位步骤）。
+- 🔎 **Token 成本可视化**：所有大模型调用统一统计 Token 消耗；在运行记录/套件汇总/自愈事件/修复建议/NL2Case 等入口展示明细与总计。
+- 🧰 **失败用例修复建议**：失败后可生成 AI 修复建议（根因解释 + 可执行的 patched_steps），并支持一键应用到用例。
+- 📦 **测试套件与执行计划 (Test Suites)**：支持将用例组装为 Suite 批量运行。可指定全局的“前置登录用例”（通过注入 Browser Context 共享状态），一次登录，全套件复用。
+- 📺 **实时监控与运行历史**：套件执行时，控制台右侧会**实时播放测试画面**和执行日志。每次运行的截帧、步骤耗时、Token 与日志均会落盘，方便随时回放审计。
+- 🧩 **Chrome 录制插件伴侣**：配合专属浏览器插件，在真实网页上点一点即可录制操作步骤，用例会自动同步到 Web 控制台。
+- ⚡ **丰富的交互能力支持**：支持 `click`, `input`, `wait`, `hover`, `select_option`, `press_key`, `scroll` (支持局部容器滚动) 以及多种 `assert` (断言) 动作。
 
 ---
 
 ## 📦 架构设计
 
+本项目采用前后端分离设计：
+
 ```text
 ai-web-tester/
-├── main.py                     # 统一的 CLI 程序主入口 (run / generate)
-├── src/
-│   └── ai_tester/              # 框架核心代码
-│       ├── agent.py            # 🧠 AI 大脑：负责分析页面意图和自主探索执行 (ReAct 模式)
-│       ├── healer.py           # 🚑 元素自愈引擎：传统脚本失效时的守护者
-│       ├── asserter.py         # 🔍 智能断言引擎：评估页面语义状态
-│       ├── extractor.py        # 📊 智能提取引擎：页面数据提取爬虫
-│       ├── generator.py        # ⚙️ 测试生成器：读取 PRD 并输出 pytest 代码
-│       ├── driver.py           # 🚗 驱动层：封装 Playwright 动作
-│       ├── logger.py           # 📝 格式化全中文日志模块
-│       ├── pytest_plugin.py    # 📊 HTML 测试报告与 Pytest Hook
-│       ├── run_context.py      # 🔄 上下文环境：每次运行的独立记录与 Token 统计
-│       └── inject/
-│           └── extract_elements.js  # 🚀 核心：注入浏览器端，提取高压缩率的语义交互树
-├── examples/                   # 示例演示代码
-│   ├── conftest.py             # 引入测试报告和全局配置
-│   ├── test_demo.py            # 示例：混合编程测试（意图执行 + 智能断言 + 元素自愈）
-│   └── test_baidu_search.py    # 示例：由 AI 自动生成的自然语言测试脚本
-├── tests/                      # 您的业务测试代码目录
-│   ├── conftest.py             # 业务测试全局配置
-│   ├── test_dustess.py         # 示例：完整的后台管理端自动化测试脚本
-│   └── test_template.py        # 模板：预置的空白测试用例，供您直接复制编写
-├── logs/                       # 自动生成的日志与 HTML 报告存放处
-│   └── runs/                   # 每次运行产生的独立报告、截图与日志文件夹
-└── TODO.md                     # 进阶开发计划与 Todo List
+├── src/ai_tester/              # 🐍 底层 Python 驱动与自愈引擎
+│   ├── agent.py                # AI 探索与意图理解引擎
+│   ├── healer.py               # AI 元素自愈引擎 (含评分机制与回写)
+│   ├── driver.py               # Playwright 动作封装
+│   └── inject/                 # JS 注入脚本：DOM 降维压缩提权
+├── web_server/                 # 🚀 Web 后端 (FastAPI)
+│   └── app.py                  # API、WebSocket 日志/截图实时推送、子进程调度
+├── frontend/                   # 💻 Web 前端控制台 (React + Tailwind)
+│   └── src/App.tsx             # 核心视图：用例大厅、运行回放、自愈审核
+├── extension/                  # 🧩 Chrome 录制插件
+├── tests/                      # 数据落盘目录 (自动生成)
+│   ├── recorded_cases/         # 用例 JSON 库
+│   ├── run_history/            # 单用例运行产物 (日志、截图、元数据、token_usage)（默认不入库）
+│   └── suite_history/          # 套件运行产物（默认不入库）
+└── ROADMAP.md                  # 开发演进路线
 ```
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 环境依赖
+### 1. 环境准备
 
-确保您的系统已安装 Python 3.8+。建议使用虚拟环境：
+确保您的系统已安装 **Python 3.8+** 和 **Node.js**。
+
+克隆仓库后，配置 Python 虚拟环境并安装底层依赖：
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-安装框架依赖及 Playwright 浏览器内核：
-
-```bash
-pip install playwright pytest pytest-playwright langchain langchain-openai pydantic python-dotenv
+pip install -r web_server/requirements.txt
 playwright install chromium
 ```
 
 ### 2. 配置大模型 API Key
 
-本项目基于 `langchain_openai` 开发，因此**原生兼容所有支持 OpenAI 接口格式的大模型平台**（如 OpenAI, GitHub Models, 硅基流动, DeepSeek 等）。
-
-复制配置文件模板：
+复制配置模板并填入您的 LLM 信息（原生兼容所有支持 OpenAI API 格式的模型）：
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，填入您的 API 信息（以 GitHub Models 为例）：
-
 ```env
+# .env 示例 (以 GitHub Models 为例)
 OPENAI_API_BASE=https://models.inference.ai.azure.com
 OPENAI_API_KEY=github_pat_xxxxxx
+OPENAI_MODEL_NAME=gpt-4o
+```
+*(推荐使用多模态能力较强的模型，如 `gpt-4o`, `Claude 3.5 Sonnet`)*
+
+### 3. 启动服务
+
+**启动后端 (FastAPI)**：
+```bash
+# 确保在 venv 激活状态下
+cd web_server
+python3 -m uvicorn app:app --reload --host 127.0.0.1 --port 8000
 ```
 
-> **提示**：建议使用推理能力较强的模型（如 `gpt-4o`, `gpt-4o-mini`, `Claude 3.5 Sonnet`, `deepseek-chat`）。
+**启动前端 (React)**：
+```bash
+# 新开一个终端窗口
+cd frontend
+npm install
+npm run dev
+```
 
-### 3. 运行演示用例与代码生成
+打开浏览器访问 `http://127.0.0.1:5173/`，即可进入 Web 控制台。
 
-框架提供了一个统一的入口命令 `python3 main.py`，让您可以更优雅地执行测试和生成代码：
+### 4. 配合 Chrome 插件使用 (可选但推荐)
 
-- **执行测试用例**:
-  ```bash
-  # 运行 examples 目录下的所有演示测试 (默认带 UI 界面)
-  python3 main.py run
-  
-  # 运行指定的测试文件，并开启无头模式 (不显示浏览器)
-  python3 main.py run examples/test_demo.py --headless
-  ```
-
-- **代码自动生成**: 读取外部的 PRD 文档或自然语言，让 AI 自动生成 Python 测试代码。
-  ```bash
-  # 方式 1：使用纯自然语言描述生成测试代码
-  python3 main.py generate --text "打开必应搜索，输入人工智能，断言页面标题包含人工智能" --out tests/test_bing.py
-  
-  # 方式 2：使用已有的 PRD 文档生成测试代码
-  python3 main.py generate --prd requirements/my_prd.md --out tests/test_my_feature.py
-  ```
-
-- **基于模板编写**: 您可以直接复制预置的空白模板，填入自己的自然语言指令进行测试。
-  ```bash
-  cp tests/test_template.py tests/test_my_app.py
-  python3 main.py run tests/test_my_app.py
-  ```
-
-运行结束后，您可以进入 `logs/runs/<运行时间>/` 目录下打开 `test_report.html` 查看精美的测试报告，或者查看 AI 每一步决策的详细日志和失败截图。
+1. 打开 Chrome，访问 `chrome://extensions/`
+2. 开启右上角的 **开发者模式**
+3. 点击 **加载已解压的扩展程序**，选择本项目的 `extension/` 目录
+4. 在您需要测试的网页上点击插件图标即可开始录制操作，录制产物会自动发往 Web 控制台。
 
 ---
 
-## ✅ 最佳实践
+## 🎥 工作流演示
 
-- **优先用环境变量统一管理模型**：建议在 `.env` 里配置 `OPENAI_API_BASE / OPENAI_API_KEY / OPENAI_MODEL_NAME`，业务代码里尽量不硬编码 `model_name`，只在需要覆盖时传参（例如某个用例强制使用视觉模型）。
-- **控制单次意图的复杂度**：将长流程拆成多个 `agent.step(...)`，每个 step 最好可在 3–8 步内完成，避免大模型在复杂页面里探索过久导致 Token 暴涨。
-- **意图里明确“完成条件”**：在意图末尾明确写清楚“完成后必须返回 done”，能显著减少模型在任务已完成后继续尝试的概率。
-- **默认关闭视觉，按需开启**：`use_vision=False` 通常更省 Token；只有遇到复杂组件（卡片、表格、浮层、多列布局、动态列表）或 DOM 信息不足时再启用 `use_vision=True`，或使用 `auto_vision=True` 让框架自行兜底切换。
-- **充分利用缓存回放机制**：同一条稳定意图跑通一次后会写入本地缓存，后续回归优先命中回放实现 0 Token；当 UI 变更导致回放失败时才会唤醒大模型重新探索。
-- **减少无效点击与遮挡问题**：遇到 “intercepts pointer events” 或遮挡浮层时，优先在意图里加入“先关闭弹窗/遮罩/引导层”或“滚动到可见区域后再点击”的描述；必要时拆分成“关闭干扰 → 再点击目标”两步意图。
-- **排查问题的推荐方式**：优先用 `--headless` 跑回归；复现问题时切换为有头模式并打开日志（`logs/`）观察每一步的目标元素与 Token 消耗；如果页面频繁改版，清理缓存后重新跑一次以生成新的稳定路径。
-
-## 🛠️ 使用示例
-
-您可以将 `ai_tester` 作为一个常规的 Python 包，在任何业务测试中灵活调用。
-
-### 场景一：混合编程（0 Token 高速回放 + AI 自愈兜底）
-
-在日常回归测试中，为了追求极致速度，我们依然可以使用传统选择器（或让大模型执行过一次产生的缓存）。当选择器因前端重构而失效时，再让 AI 兜底自愈。
-
-```python
-from ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer
-
-def test_login_with_healing(page):
-    driver = PlaywrightDriver(page)
-    # 推荐在 .env 中设置 OPENAI_MODEL_NAME，这里不强行写死模型
-    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)
-    healer = SelfHealer(use_vision=True)
-
-    broken_selector = "#old-login-btn"
-    
-    try:
-        # 1. 尝试极速的传统执行 (0 Token, 毫秒级)
-        page.click(broken_selector, timeout=2000)
-    except Exception:
-        # 2. 如果因为 UI 变更报错，触发 AI 元素自愈
-        current_dom = agent.get_dom_tree_str()
-        screenshot = driver.get_screenshot()
-        
-        # 告诉 AI 那个失效的按钮是干什么用的
-        new_id_or_selector = healer.heal(broken_selector, "登录提交按钮", current_dom, screenshot)
-        
-        # 使用 AI 找到的新目标继续执行测试！
-        driver.perform_action("click", new_id_or_selector)
-```
-
-### 场景二：完全意图驱动与代码自动回写
-
-彻底抛弃定位器，用人类语言测试页面。跑通一次后，框架自动帮你把测试代码写好！
-
-```python
-from ai_tester import PlaywrightDriver, AITesterAgent, SmartAsserter
-
-def test_search_feature(page):
-    driver = PlaywrightDriver(page)
-    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)
-    asserter = SmartAsserter(use_vision=True)
-    
-    page.goto("https://example.com")
-    
-    # 意图驱动执行多步操作。
-    # 💡 魔法时刻：当这行代码成功运行一次后，它会被自动注释掉，
-    # 并在下方自动生成原生的 page.fill 和 page.click 代码！
-    agent.step("在顶部搜索框输入 'iPhone 15'，然后按下回车键，结束后返回 done")
-    
-    # 语义化多模态断言
-    current_dom = agent.get_dom_tree_str()
-    screenshot = driver.get_screenshot()
-    is_passed = asserter.evaluate(
-        current_dom, 
-        "页面跳转到了搜索结果，并且展示了多款 iPhone 15 的商品列表",
-        screenshot
-    )
-    assert is_passed is True
-```
-
-### 场景三：智能数据提取 (Data Extractor)
-
-除了动作和断言，AI 还能作为您的“智能爬虫”和“表格读取器”，直接将复杂的页面转化为结构化的 JSON 数据。
-
-```python
-from ai_tester import PlaywrightDriver, DataExtractor
-
-def test_data_extractor(page):
-    driver = PlaywrightDriver(page)
-    page.goto("https://practicetestautomation.com/practice-test-login/")
-    
-    # 使用 use_vision=True 获取更精准的结构化提取能力
-    extractor = DataExtractor(driver, use_vision=True)
-    
-    # 通过自然语言提取页面上的账号和密码提示信息
-    query = "提取页面上提示的 Test username 和 Test password，返回格式: {\"username\": \"...\", \"password\": \"...\"}"
-    data = extractor.extract(query)
-    
-    assert data.get("username") == "student"
-```
-
-### 场景四：从需求文档 (PRD) 直接生成测试代码
-
-```python
-from ai_tester import TestCaseGenerator
-
-generator = TestCaseGenerator()
-
-prd_text = """
-功能：用户注册
-场景：输入正确的用户名和符合规则的密码，点击注册按钮。
-预期：页面提示注册成功并跳转到用户中心。
-"""
-
-# 直接生成可执行的 pytest 脚本文件
-generator.generate_from_prd(prd_text, "tests/test_auto_register.py")
-```
+1. **创建/录制用例**：通过插件录制或在 Web 端手写步骤。每个步骤可以只有一个“自然语言意图”（如 `点击登录`），不需要填 `selector`。
+2. **首次运行 (探索与自愈)**：点击运行，底层 `ai_tester` 引擎发现选择器缺失/失效，会唤醒大模型扫描当前页面，返回候选元素并给出稳定性评分，同时记录 Token 消耗。
+3. **极速回归**：第二次运行该用例时，引擎会优先命中本地缓存的 selector 执行操作，通常 **0 Token** 或极低 Token。
+4. **UI 变更触发自愈**：某天前端改版了，旧 selector 失效。执行到该步骤时引擎拦截到报错，再次唤醒大模型完成自愈并继续执行。
+5. **自愈审计与回写**：在 Web 端的自愈审计大盘中查看“自愈前/后截图对比（支持放大查看）”，确认无误后可一键 **批准更新** 写回用例 steps.selector（支持原 selector 为空时按意图定位步骤）。
+6. **失败修复建议**：如果运行失败，可生成 AI 修复建议（根因解释 + patched_steps），并一键应用到用例。
 
 ---
 
@@ -265,11 +143,11 @@ generator.generate_from_prd(prd_text, "tests/test_auto_register.py")
 - [**browser-use**](https://github.com/browser-use/browser-use) 
 - [**alibaba/page-agent**](https://github.com/alibaba/page-agent)
 
+---
+
 ## 🤝 贡献与支持
 
 欢迎提交 Issue 和 Pull Request 来共同完善这个项目！
 如果您觉得这个框架对您有启发，欢迎给本项目点个 ⭐️ **Star**！
-
-## 📄 License
 
 [MIT License](LICENSE) © 2026 RockChe

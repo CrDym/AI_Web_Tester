@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 import pytest
 import time
 import shutil
@@ -263,11 +264,46 @@ def pytest_sessionfinish(session, exitstatus):
         report_path = os.path.join(run_dir, "test_report.html")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
-        print(f"\n📊 简洁美观的测试报告已生成: file://{os.path.abspath(report_path)}")
+        print(f"\n📊 测试报告已生成: file://{os.path.abspath(report_path)}")
+        try:
+            record_dir = os.environ.get("AI_TESTER_RUN_HISTORY_DIR")
+            if record_dir:
+                os.makedirs(record_dir, exist_ok=True)
+                summary = {"tests": [], "totals": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
+                for r in test_results:
+                    nodeid = r.get("nodeid") or r.get("name")
+                    totals = run_context.get_token_totals(nodeid)
+                    events = run_context.get_events(nodeid)
+                    llm_events = []
+                    for e in events:
+                        usage = e.get("token_usage")
+                        if not usage:
+                            continue
+                        llm_events.append({
+                            "ts": e.get("ts"),
+                            "kind": e.get("kind"),
+                            "message": e.get("message"),
+                            "token_usage": usage,
+                            "extra": e.get("extra"),
+                        })
+                    summary["tests"].append({
+                        "name": r.get("name"),
+                        "nodeid": nodeid,
+                        "token_usage": totals,
+                        "llm_events": llm_events,
+                    })
+                    summary["totals"]["prompt_tokens"] += int(totals.get("prompt_tokens", 0) or 0)
+                    summary["totals"]["completion_tokens"] += int(totals.get("completion_tokens", 0) or 0)
+                    summary["totals"]["total_tokens"] += int(totals.get("total_tokens", 0) or 0)
+                out_path = os.path.join(record_dir, "token_usage.json")
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(summary, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
     else:
         report_dir = os.path.join(os.getcwd(), "docs")
         os.makedirs(report_dir, exist_ok=True)
         report_path = os.path.join(report_dir, "test_report.html")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
-        print(f"\n📊 简洁美观的测试报告已生成: file://{os.path.abspath(report_path)}")
+        print(f"\n📊 测试报告已生成: file://{os.path.abspath(report_path)}")

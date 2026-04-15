@@ -10,7 +10,9 @@
     "tabs"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
@@ -27,7 +29,8 @@
     {
       "matches": ["<all_urls>"],
       "js": ["lib/html2canvas.min.js", "src/recorder.js"],
-      "css": ["src/recorder.css"]
+      "css": ["src/recorder.css"],
+      "all_frames": true
     }
   ]
 }

@@ -6,10 +6,10 @@
  */
 function extractInteractiveElements(startId = 1) {
     const interactiveTags = ['A', 'BUTTON', 'INPUT', 'SELECT', 'OPTION', 'TEXTAREA'];
-    const interactiveRoles = ['button', 'link', 'checkbox', 'menuitem', 'option', 'tab'];
+    const interactiveRoles = ['button', 'link', 'checkbox', 'menuitem', 'option', 'tab', 'combobox', 'searchbox', 'switch', 'slider', 'listbox', 'treeitem'];
     
     // We also want to extract large text blocks for assertion purposes
-    const contentTags = ['H1', 'H2', 'H3', 'P', 'STRONG', 'B', 'ARTICLE', 'SECTION', 'SPAN', 'DIV'];
+    const contentTags = ['H1', 'H2', 'H3', 'P', 'STRONG', 'B', 'ARTICLE', 'SECTION', 'SPAN', 'DIV', 'LABEL'];
     
     let elementIdCounter = startId;
     const elements = [];
@@ -18,37 +18,107 @@ function extractInteractiveElements(startId = 1) {
         if (interactiveTags.includes(el.tagName)) return true;
         const role = el.getAttribute('role');
         if (role && interactiveRoles.includes(role)) return true;
-        if (el.onclick != null || el.getAttribute('ng-click') != null || el.getAttribute('@click') != null) return true;
+        if (el.onclick != null || el.getAttribute('ng-click') != null || el.getAttribute('@click') != null || el.getAttribute('v-on:click') != null) return true;
         
+        // 增加现代前端框架的 className 判断
+        const className = el.getAttribute('class') || '';
+        const tagName = el.tagName.toLowerCase();
+        
+        // 增加自定义元素（Web Components / Angular等）的 tagName 判断
+        if (tagName.includes('cf-') || tagName.includes('select') || tagName.includes('dropdown')) {
+            return true;
+        }
+
+        if (typeof className === 'string') {
+            const lowerClass = className.toLowerCase();
+            if (lowerClass.includes('select') || 
+                lowerClass.includes('input') ||
+                lowerClass.includes('search') ||
+                lowerClass.includes('dropdown') ||
+                lowerClass.includes('cascader') ||
+                lowerClass.includes('picker') ||
+                lowerClass.includes('combo') ||
+                lowerClass.includes('button') ||
+                lowerClass.includes('btn') ||
+                lowerClass.includes('cursor-pointer') ||
+                lowerClass.includes('cf-') ||
+                lowerClass.includes('ant-select-item') ||
+                lowerClass.includes('option') ||
+                lowerClass.includes('item') ||
+                lowerClass.includes('selection')) {
+                return true;
+            }
+            
+            // 专门放开 cf-select-arrow 这类下拉箭头
+            if (lowerClass.includes('arrow') || lowerClass.includes('icon') || lowerClass.includes('cf-select')) {
+                return true;
+            }
+        }
+        
+        // 针对 Element/Antd 等框架包裹层的特殊处理：
+        // 很多时候真正的 input 被隐藏了，而外层用一个没有点击事件的 div/span 伪装成输入框
+        if (el.tagName === 'DIV' || el.tagName === 'SPAN') {
+            // 如果内部有 placeholder 文字或者选中的文字，说明它承载了输入框的功能
+            const text = el.innerText || '';
+            if (text.includes('请选择') || text.includes('请输入')) return true;
+            // 通过 placeholder 属性来判断
+            if (el.getAttribute('placeholder')) return true;
+        }
+
+        // 强行把所有自定义标签（比如 <cf-select-arrow> 等）以及常见的输入相关的都作为交互元素
+        if (el.tagName.toLowerCase().includes('cf-') || el.tagName.toLowerCase().includes('select') || el.tagName.toLowerCase().includes('input')) {
+            return true;
+        }
+
         // Return true if it's a content tag with actual text, so the LLM can assert
-        if (contentTags.includes(el.tagName) && el.innerText && el.innerText.trim().length > 2 && el.children.length === 0) return true;
+        // Relaxing the children.length === 0 constraint slightly to allow simple wrappers
+        if (contentTags.includes(el.tagName) && el.innerText && el.innerText.trim().length > 2) {
+            // If it has too many children, it's a layout container, not a leaf content node
+            if (el.children.length <= 1) return true;
+        }
         
         return false;
     }
 
     function isVisible(el) {
         const style = window.getComputedStyle(el);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        
+        // Many modern UI frameworks (like Antd/Element) use opacity: 0 on inputs to hide the native caret
+        // but keep them functional. We should not filter out inputs with opacity 0 if they have dimensions.
+        // 注意：有些组件会把包裹层甚至下拉箭头的透明度设为 0 但是通过其他方式显示，所以我们放宽条件
+        if (style.opacity === '0' || style.visibility === 'hidden') {
+             // 绝对宽容：如果是我们怀疑的输入框或箭头，即便被标记为透明或隐藏，只要它有长宽，我们就把它捞出来
+             if (el.tagName === 'INPUT' || 
+                 el.tagName.toLowerCase().includes('cf-') || 
+                 el.getAttribute('class')?.includes('input') || 
+                 el.getAttribute('class')?.includes('select') ||
+                 el.getAttribute('class')?.includes('arrow')) {
+                 // 放行
+             } else {
+                 return false;
+             }
+        }
+        
+        if (style.display === 'none') return false;
+        
         const rect = el.getBoundingClientRect();
+        
+        // 特殊放宽：有些前端组件的 input 或 arrow 宽高可能被挤压得很小，但依然承载了点击唤起下拉框的职责
+        if (el.tagName === 'INPUT' || 
+            el.tagName.toLowerCase().includes('cf-') || 
+            el.getAttribute('class')?.includes('arrow') || 
+            el.getAttribute('class')?.includes('cf-select')) {
+            // 彻底移除对 0 尺寸的强制过滤，允许提取纯伪元素绘制的箭头或者被框架压缩的 input
+            return true;
+        }
+
+        // 常规元素依然过滤掉宽高为 0 的
         if (rect.width === 0 || rect.height === 0) return false;
         
-        // 核心优化：只提取在当前视口 (Viewport) 内的元素
-        // 如果元素完全在屏幕外，则大模型暂时不需要看到它，极大地节省 Token
-        const windowHeight = window.innerHeight || document.documentElement.clientHeight;
-        const windowWidth = window.innerWidth || document.documentElement.clientWidth;
+        // 在不使用 viewport 过滤的情况下，依然要过滤掉实际上不可见的超小元素
+        if (rect.width < 1 || rect.height < 1) return false;
         
-        // 允许有一点点缓冲区域 (比如 100px)，防止刚好露出一半的元素被忽略
-        const buffer = 100;
-        
-        // 判断是否与视口有交集
-        const inViewport = (
-            rect.top < windowHeight + buffer &&
-            rect.bottom > -buffer &&
-            rect.left < windowWidth + buffer &&
-            rect.right > -buffer
-        );
-        
-        return inViewport;
+        return true;
     }
 
     function getCssSelector(el) {
@@ -71,10 +141,14 @@ function extractInteractiveElements(startId = 1) {
         }
         
         // 4. 尝试使用文本定位 (Playwright 兼容的 CSS 扩展伪类 :has-text)
-        if (['BUTTON', 'A', 'SPAN', 'DIV'].includes(el.tagName)) {
+        // 避免模糊匹配，对于纯文本节点，我们最好使用精确匹配
+        if (['BUTTON', 'A', 'SPAN', 'DIV', 'LABEL'].includes(el.tagName)) {
             const text = el.innerText ? el.innerText.trim() : '';
             if (text.length > 0 && text.length < 20 && !text.includes('\n')) {
-                return `${el.tagName.toLowerCase()}:has-text("${text}")`;
+                // 使用 text= 精确匹配而不是包含匹配，防止点到外层大容器
+                // 但是对于一些复杂框架的内部嵌套，text= 可能找不准。
+                // 保留旧版本的 text 匹配逻辑
+                return `text="${text}"`;
             }
         }
 
@@ -83,7 +157,8 @@ function extractInteractiveElements(startId = 1) {
         let current = el;
         while (current && current.nodeType === Node.ELEMENT_NODE && current.tagName.toLowerCase() !== 'html') {
             let selector = current.tagName.toLowerCase();
-            if (current.id) {
+            // 过滤掉前端框架动态生成的长串数字 ID (如 el-popper-1234)
+            if (current.id && /^[a-zA-Z0-9_-]+$/.test(current.id) && !/\d{3,}/.test(current.id)) {
                 selector = '#' + CSS.escape(current.id);
                 path.unshift(selector);
                 break;
@@ -105,11 +180,22 @@ function extractInteractiveElements(startId = 1) {
 
     function traverse(node) {
         if (node.nodeType === Node.ELEMENT_NODE) {
-            if (!isVisible(node)) return;
+            // 这里非常关键：不能因为节点不可见就直接 return 截断子节点遍历
+            // 因为有些包裹层 div 只是用于绝对定位，其尺寸为 0 甚至透明，但里面的真实内容是可见的
+            const visible = isVisible(node);
+            
+            // 只有当 display: none 时，子节点才必定不可见，此时可以安全截断
+            if (window.getComputedStyle(node).display === 'none') {
+                return;
+            }
 
-            if (isInteractive(node)) {
+            let extracted = false;
+            // 仅当节点自身可见且具有交互性时才提取
+            if (visible && isInteractive(node)) {
                 // 打上 AI 专用的标记
                 node.setAttribute('ai-id', elementIdCounter);
+                
+                const rect = node.getBoundingClientRect();
                 
                 elements.push({
                     id: elementIdCounter,
@@ -121,11 +207,24 @@ function extractInteractiveElements(startId = 1) {
                     id_attr: node.getAttribute('id') || '',
                     type: node.getAttribute('type') || '',
                     css_selector: getCssSelector(node),
-                    bbox: node.getBoundingClientRect()
+                    bbox: {
+                        // 只需要视口坐标，因为 screenshot(full_page=False) 截取的是当前视口
+                        x: rect.x,
+                        y: rect.y,
+                        width: rect.width,
+                        height: rect.height
+                    }
                 });
                 elementIdCounter++;
+                extracted = true;
             }
             
+            // 优化：如果当前节点已经被提取了（比如一个包含完整文本的 button），
+            // 就没有必要再去深挖它的内部 span 节点了，防止产生层层嵌套的“俄罗斯套娃红框”
+            if (extracted && ['BUTTON', 'A', 'OPTION'].includes(node.tagName)) {
+                return;
+            }
+
             // 继续遍历子节点
             for (let child of node.childNodes) {
                 traverse(child);

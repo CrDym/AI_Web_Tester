@@ -49,3 +49,11 @@ tests/test_generated_*.py
 .healer_cache/
 .intent_cache/
 .PRIVATE_DEV_PLAN.md
+tests/run_history/
+tests/suite_history/
+tests/recorded_scripts/
+frontend/node_modules/
+frontend/dist/
+.pytest_cache/
+.DS_Store
+.trae/

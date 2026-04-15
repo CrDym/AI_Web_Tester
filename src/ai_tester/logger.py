@@ -13,9 +13,10 @@ def setup_logger():
     
     logger.setLevel(logging.INFO)
 
-    # 创建格式化器
+    # 创建格式化器 - 简化用于 Web UI 显示，去掉了冗长的日期和行号，只保留时间、级别和内容
     formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+        '[%(asctime)s] %(message)s',
+        datefmt='%H:%M:%S'
     )
 
     # 为了防止多次调用产生重复的 Console handler

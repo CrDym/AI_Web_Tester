@@ -21,7 +21,9 @@ class AITesterAgent:
         self.total_tokens = 0
         self.enable_code_rewrite = enable_code_rewrite
         
-        final_model_name = model_name or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        final_model_name = model_name or os.environ.get("OPENAI_MODEL_NAME")
+        if not final_model_name:
+            raise ValueError("未配置大模型名称。请在环境变量或代码中配置 OPENAI_MODEL_NAME。")
 
         # 允许从环境变量读取，或默认使用 OpenAI (国内可替换代理)
         self.llm = ChatOpenAI(
@@ -195,7 +197,10 @@ class AITesterAgent:
         cache_key = self._get_intent_cache_key(intent)
         cache_file = os.path.join(cache_dir, f"{cache_key}.json")
         
-        if os.path.exists(cache_file):
+        # 允许外部通过环境变量强制绕过缓存 (用于调试特定步骤)
+        ignore_cache = os.environ.get("AI_TESTER_IGNORE_CACHE", "0") == "1"
+        
+        if not ignore_cache and os.path.exists(cache_file):
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cached_actions = json.load(f)
@@ -270,25 +275,33 @@ class AITesterAgent:
                 
                 # 如果 b64_img 还没生成，则在这里生成（避免重复调用 screenshot）
                 # 这里为了简化，我们调整一下逻辑顺序，先生成截图再构造 prompt 和保存调试图
-                b64_img = self.driver.get_screenshot(page_data.get('elements', []))
-                
-                screenshot_path = os.path.join(debug_dir, f"step_{step_idx+1}.jpg")
-                with open(screenshot_path, "wb") as f:
-                    f.write(base64.b64decode(b64_img))
-                logger.debug(f"带框截图已保存至 {screenshot_path}")
-                run_context.record_event("debug_screenshot", screenshot_path)
-                
-                human_content = [
-                    {"type": "text", "text": user_prompt},
-                    {
-                        "type": "image_url", 
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64_img}",
-                            "detail": "high" 
-                        }
-                    }
-                ]
-                logger.debug("已附加当前页面高清截图(带画框标注)进入多模态分析。")
+                try:
+                    b64_img = self.driver.get_screenshot(page_data.get('elements', []))
+                    
+                    if b64_img:
+                        screenshot_path = os.path.join(debug_dir, f"step_{step_idx+1}.jpg")
+                        with open(screenshot_path, "wb") as f:
+                            f.write(base64.b64decode(b64_img))
+                        logger.debug(f"带框截图已保存至 {screenshot_path}")
+                        run_context.record_event("debug_screenshot", screenshot_path)
+                        
+                        human_content = [
+                            {"type": "text", "text": user_prompt},
+                            {
+                                "type": "image_url", 
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{b64_img}",
+                                    "detail": "high" 
+                                }
+                            }
+                        ]
+                        logger.debug("已附加当前页面高清截图(带画框标注)进入多模态分析。")
+                    else:
+                        logger.warning("⚠️ 截图返回为空，降级为纯文本模式。")
+                        human_content = [{"type": "text", "text": user_prompt}]
+                except Exception as e:
+                    logger.warning(f"⚠️ 获取截图失败，降级为纯文本模式: {e}")
+                    human_content = [{"type": "text", "text": user_prompt}]
             else:
                 human_content = [{"type": "text", "text": user_prompt}]
 
@@ -389,7 +402,11 @@ class AITesterAgent:
                 
                 action_history.append(action_record)
                 # 等待页面稳定
-                self.driver.page.wait_for_timeout(1000)
+                # 这里如果动作是 type，我们额外多等一会儿，因为下拉框搜索往往有防抖延迟
+                if action == "type":
+                    self.driver.page.wait_for_timeout(2000)
+                else:
+                    self.driver.page.wait_for_timeout(1000)
                 
                 if consecutive_failures >= 3:
                     logger.error("❌ 连续失败/死循环次数过多，自动终止当前意图的探索。")

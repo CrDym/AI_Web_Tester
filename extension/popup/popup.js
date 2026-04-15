@@ -42,18 +42,21 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.runtime.sendMessage({ type: "CLEAR_ACTIONS" }, () => updateUI());
     });
 
-    function generatePythonScript(actions) {
+    async function generatePythonScript(actions) {
         if (actions.length === 0) return alert("没有录制到任何动作。");
         
-        let script = `from ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer\n\n`;
+        let script = `import sys\nimport os\nfrom dotenv import load_dotenv\nsys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))\n\nload_dotenv()\n\nfrom ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer\n\n`;
         script += `def test_recorded_flow(page):\n`;
+        script += `    # 增加这行，让脚本执行慢一点，并且确保能看到浏览器\n`;
+        script += `    page.wait_for_timeout(2000)\n`;
         script += `    driver = PlaywrightDriver(page)\n`;
         script += `    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)\n`;
         script += `    healer = SelfHealer(use_vision=True)\n\n`;
         
         actions.forEach((act, index) => {
             script += `    # Step ${index + 1}: ${act.intent}\n`;
-            script += `    selector_${index} = "${act.selector}"\n`;
+            let safeSelector = act.selector.replace(/"/g, "'");
+            script += `    selector_${index} = "${safeSelector}"\n`;
             script += `    try:\n`;
             if (act.type === "click") {
                 script += `        page.click(selector_${index}, timeout=3000)\n`;
@@ -74,13 +77,41 @@ document.addEventListener('DOMContentLoaded', () => {
             script += `            raise Exception("AI 自愈失败，无法完成步骤 ${index + 1}")\n\n`;
         });
 
-        // 触发文件下载
-        const blob = new Blob([script], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "test_recorded_flow.py";
-        a.click();
+        const defaultFileName = `case_${new Date().getTime()}`;
+
+        try {
+            const startUrl = actions[0] && actions[0].url ? actions[0].url : null;
+            const response = await fetch("http://127.0.0.1:8000/api/cases", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    name: defaultFileName,
+                    start_url: startUrl,
+                    steps: actions
+                })
+            });
+            
+            if (response.ok) {
+                alert("✅ 用例已成功发送到本地管理控制台！请在浏览器中打开 http://127.0.0.1:5173 查看。");
+            } else {
+                throw new Error("Server responded with error");
+            }
+        } catch (e) {
+            console.error("上传失败，降级为下载文件", e);
+            const payload = {
+                name: defaultFileName,
+                start_url: actions[0] && actions[0].url ? actions[0].url : null,
+                steps: actions
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${defaultFileName}.json`;
+            a.click();
+        }
     }
 
     updateUI();
