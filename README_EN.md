@@ -11,7 +11,7 @@
 
 *Let AI take over fragile CSS selectors and drive your end-to-end (E2E) tests with natural language intent.*
 
-[中文文档](README.md) · [Features](#-core-features) · [Quick Start](#-quick-start) · [Architecture](#-architecture) · [Workflow Demo](#-workflow-demo)
+[中文文档](README.md) · [Features](#-core-features) · [Quick Start](#-quick-start) · [Console Guide](#-console-guide) · [API Overview](#-api-overview) · [Architecture](#-architecture)
 
 </div>
 
@@ -32,9 +32,11 @@ In traditional Web UI automation testing (such as Selenium and native Playwright
 - 🎮 **Modern Web Console**: A zero-configuration React frontend panel. Supports test case management, multi-environment configuration, and visual drag-and-drop orchestration of test steps.
 - 🗣️ **Intent-Driven**: You can simply type "Click the login button in the top right corner" or "Enter iPhone in the search box" in the editor, without manually writing any selectors.
 - 🚑 **AI Smart Self-Healing Engine**: This is the killer feature of the framework. When a previously recorded CSS selector fails due to page refactoring, the underlying engine automatically intercepts the exception, captures the current page DOM and screenshot, and sends them to the LLM. The AI finds the element again based on your "intent description" and continues the test. **Tests are no longer interrupted!**
-- 🛡️ **Self-Healing Selector Scoring & Rewrite**: During self-healing, the AI scores candidate selectors for stability (prioritizing `data-testid` or `aria` attributes). High-scoring selectors are automatically cached and rewritten, while low-scoring selectors go to the **"Self-Healing Review Page"** on the Web console for human review and comparison.
+- 🛡️ **Self-Healing Scoring & Reviewed Rewrite**: The AI scores candidate selectors for stability (preferring `data-testid` / `role` / `aria`). High-confidence selectors can be cached locally. In the Web console you can open the **Heal Audit board**, compare “before/after” screenshots, and click **Approve update** to write back selectors into the case (even if the original selector was empty, it can locate the step by intent).
+- 🔎 **Token Cost Visibility**: Token usage is tracked for every LLM call and displayed across run history, suite summary, heal events, AI fix suggestions, and NL2Case.
+- 🧰 **AI Fix Suggestions**: On failures, generate an AI fix suggestion (root cause + executable `patched_steps`) and apply it to the case with one click.
 - 📦 **Test Suites & Execution Plans**: Supports grouping test cases into Suites for batch execution. You can specify a global "Setup Login Case" (sharing state via injected Browser Context) to log in once and reuse it across the entire suite.
-- 📺 **Real-time Monitoring & Run History**: During suite execution, the right side of the console plays back the test screen in real time and streams execution logs. Frame captures, step durations, and logs for every run are saved to disk for easy playback and auditing at any time.
+- 📺 **Real-time Monitoring & Run History**: The console streams logs and screenshots in real time. Each run persists metadata, screenshots, and token summary for replay and audit.
 - 🧩 **Chrome Recording Extension Companion**: Coupled with a dedicated browser extension, you can record operation steps simply by clicking on a real webpage, and the test cases will automatically sync to the Web console.
 - ⚡ **Rich Interaction Support**: Supports `click`, `input`, `wait`, `hover`, `select_option`, `press_key`, `scroll` (including local container scrolling), and various `assert` actions.
 
@@ -48,7 +50,7 @@ This project adopts a decoupled frontend-backend design:
 ai-web-tester/
 ├── src/ai_tester/              # 🐍 Underlying Python Driver & Self-Healing Engine
 │   ├── agent.py                # AI exploration and intent understanding engine
-│   ├── healer.py               # AI element self-healing engine (w/ scoring & rewrite)
+│   ├── healer.py               # AI element self-healing engine (w/ scoring & heal event reporting)
 │   ├── driver.py               # Playwright action encapsulation
 │   └── inject/                 # JS injection scripts: DOM dimensionality reduction
 ├── web_server/                 # 🚀 Web Backend (FastAPI)
@@ -58,18 +60,28 @@ ai-web-tester/
 ├── extension/                  # 🧩 Chrome Recording Extension
 ├── tests/                      # Data storage directory (Auto-generated)
 │   ├── recorded_cases/         # JSON test case library
-│   ├── run_history/            # Single case run artifacts (logs, screenshots, metadata)
-│   └── suite_history/          # Suite run artifacts
+│   ├── run_history/            # Run artifacts (logs, screenshots, meta, token_usage) (not committed by default)
+│   └── suite_history/          # Suite run artifacts (not committed by default)
 └── ROADMAP.md                  # Development evolution roadmap
 ```
 
 ---
 
+## 🧠 Core Concepts
+
+- **Case**: a JSON file describing `start_url` + `steps`, stored under `tests/recorded_cases/` by default.
+- **Step**: a single action (`click/input/assert...`). Prefer writing a clear `intent`; `selector` can be empty.
+- **Run**: one execution of a case, persisted under `tests/run_history/<run_id>/` for replay and auditing.
+- **Heal**: when a selector is missing/invalid, the engine uses DOM (and optional screenshot) + intent to call the LLM and continue.
+- **Approve Rewrite**: healing results are not auto-written into cases. You review “before/after” screenshots in the console and click **Approve update** to write back `steps.selector`.
+- **Suite**: an ordered set of cases. Optional `setup_case` is used for login and session preparation.
+- **Token Usage**: every LLM call records token_usage; shown in run/suite summaries and per-event details.
+
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
 
-Ensure your system has **Python 3.8+** and **Node.js** installed.
+Ensure your system has **Python 3.8+** and **Node.js 18+** installed.
 
 After cloning the repository, configure the Python virtual environment and install underlying dependencies:
 
@@ -124,15 +136,171 @@ Open your browser and visit `http://127.0.0.1:5173/` to enter the Web Console.
 
 ---
 
-## 🎥 Workflow Demo
+## ⚙️ Configuration & Environment Variables
 
-1. **Create/Record Case**: Record via the extension or manually write steps in the Web console. Each step can consist of just a "natural language intent" (e.g., `Click Login`) without needing to fill in a `selector`.
-2. **First Run (Exploration & Healing)**: Click Run. The underlying `ai_tester` engine detects the missing selector and wakes up the LLM to scan the current page, find the element, and score it. If the score is high, the engine writes the reliable CSS Selector back to your case.
-3. **Ultra-fast Regression**: The second time the case runs, the engine directly uses the cached Selector from the previous run, costing **0 Tokens and executing in milliseconds**.
-4. **Self-Healing Triggered by UI Changes**: One day the frontend is redesigned, and the old Selector fails. When the engine intercepts the error at that step, it wakes up the LLM again. Combining the historical "intent" and the new page structure, the LLM successfully finds the new element location and continues the test.
-5. **Self-Healing Review**: After testing is complete, you can see the before-and-after screenshot comparisons on the "Self-Healing Review Page" in the Web console, and approve or rollback this healing action with one click.
+### `.env` (Model Config)
+
+The root `.env` typically contains:
+
+```env
+OPENAI_API_BASE=https://models.inference.ai.azure.com
+OPENAI_API_KEY=xxxx
+OPENAI_MODEL_NAME=gpt-4o-mini
+```
+
+You can also configure these in the Web Console Settings page (the server will write to `.env`).
+
+### Runtime Env Vars (Optional)
+
+| Var | Example | Notes |
+|---|---|---|
+| `PLAYWRIGHT_HEADLESS` | `1` | Headless mode (1=headless) |
+| `AI_TESTER_STORAGE_STATE_PATH` | `tests/suite_history/<suite_run_id>/storage_state.json` | Share login state via Playwright storageState |
+| `AI_TESTER_RUN_DIR` | `logs/runs/20260415_120000/` | Output directory for HTML report and failure screenshots |
 
 ---
+
+## 🧾 Case & Suite Formats
+
+### Case JSON
+
+Cases are stored at `tests/recorded_cases/*.json` by default:
+
+```json
+{
+  "id": "login.json",
+  "name": "Login",
+  "start_url": "https://example.com/login",
+  "steps": [
+    { "type": "input", "selector": "", "value": "admin", "intent": "Enter username in the username field" },
+    { "type": "input", "selector": "", "value": "123456", "intent": "Enter password in the password field" },
+    { "type": "click", "selector": "", "intent": "Click the login button" },
+    { "type": "assert", "assert_type": "text", "value": "Login successful", "intent": "Page shows login success" }
+  ]
+}
+```
+
+Notes:
+- `selector` can be empty. Missing/invalid selectors trigger healing based on `intent`.
+- `assert_type`: `text` / `url` / `visible`
+
+### Suite JSON
+
+Suites are stored at `tests/suites/*.json`:
+
+```json
+{
+  "id": "login_flow.json",
+  "name": "Login Flow",
+  "env_id": null,
+  "setup_case_id": "login.json",
+  "case_ids": ["login.json", "authorize.json"]
+}
+```
+
+---
+
+## 💾 Data Directory & Ignore Rules (Important)
+
+`tests/` is a runtime data directory and is not committed by default:
+- `tests/recorded_cases/`: case library (often company/internal)
+- `tests/run_history/`: run artifacts (meta.json, screenshots, token_usage.json)
+- `tests/suite_history/`: suite run artifacts (meta.json, storage_state.json)
+
+The repository `.gitignore` ignores `tests/` to avoid accidentally committing internal data.
+
+---
+
+## 🎥 Workflow Demo
+
+1. **Create/Record Case**: Record via the extension or manually write steps in the Web console. Each step can be just a natural-language `intent`; `selector` can be empty.
+2. **First Run (Exploration & Healing)**: If selectors are missing/invalid, the engine calls the LLM using DOM (+ optional screenshot), returns candidates with a stability score, and records token usage.
+3. **Fast Regression**: Subsequent runs often hit cached selectors and cost **0 Tokens** (or very low Tokens).
+4. **UI Change → Heal Again**: When UI changes break selectors, the engine heals and continues without stopping the run.
+5. **Heal Audit & Rewrite**: In the Heal Audit board, compare before/after screenshots (zoom supported) and click **Approve update** to write selectors back to the case.
+6. **AI Fix Suggestion**: If a run fails, generate an AI fix suggestion and apply the suggested `patched_steps` to the case.
+
+---
+
+## 🧭 Console Guide
+
+### Case Lobby
+- Search by name/ID, filter by tags
+- Create cases: blank case or NL2Case (generate steps from natural language)
+- Run history per case: status, duration, token summary; click to replay
+
+### Case Editor
+- Edit steps (`type/selector/intent/value/assert_type`)
+- View generated pytest script (for debugging / CI)
+- Save case JSON to runtime data directory
+
+### Run & Live Monitoring
+- Start a run and watch logs + screenshots in real time
+
+### Replay & Audit
+- Screenshot timeline and log replay
+- Heal events with per-event token usage
+- Heal Audit board with before/after screenshot compare (zoom)
+- Token breakdown for all LLM calls in the run
+- AI Fix Suggestion on failures
+
+### Suite
+- Create suites, reorder cases, configure setup_case
+- Run suites with aggregated pass/fail/heal/token summary
+- Per-case row shows duration/heal/token/status and jump to replay
+
+### Settings & Environments
+- Configure model (`OPENAI_API_BASE/KEY/MODEL_NAME`) and test connection
+- Manage environments (base_url) for running the same cases against different deployments
+
+---
+
+## 🌐 API Overview
+
+Backend listens on `http://127.0.0.1:8000`.
+
+### Public APIs (Recommended)
+
+| Category | Method | Route | Notes |
+|---|---|---|---|
+| Config | GET | `/api/config` | Read model config from `.env` |
+| Config | POST | `/api/config` | Persist model config to `.env` |
+| Config | POST | `/api/config/test` | Test model connectivity (returns latency + token_usage) |
+| Environments | GET | `/api/environments` | List environments |
+| Environments | POST | `/api/environments` | Save environments |
+| Cases | GET | `/api/cases` | List cases |
+| Cases | POST | `/api/cases` | Create case |
+| Cases | GET | `/api/cases/{case_id}` | Get case detail |
+| Cases | PUT | `/api/cases/{case_id}` | Update case |
+| Cases | DELETE | `/api/cases/{case_id}` | Delete case |
+| Cases | POST | `/api/cases/{case_id}/rename` | Rename case |
+| NL2Case | POST | `/api/cases/generate` | Generate steps (returns token_usage) |
+| Heal | POST | `/api/cases/{case_id}/heal/approve` | Approve rewrite (supports empty old_selector by intent) |
+| Script | GET | `/api/cases/{case_id}/script` | Get generated pytest script |
+| Run | POST | `/api/run/{case_id}` | Start run (returns run_id/session_id) |
+| Run | GET | `/api/runs?case_id=...` | List runs |
+| Run | GET | `/api/runs/{run_id}` | Run detail (logs/screens/heal/token_summary) |
+| Run | DELETE | `/api/runs/{run_id}` | Delete run |
+| Run | GET | `/api/runs/{run_id}/screenshots/{filename}` | Get screenshot (base64) |
+| Fix Suggest | POST | `/api/runs/{run_id}/ai_fix_suggest` | Generate fix suggestion (returns token_usage) |
+| Suites | GET | `/api/suites` | List suites |
+| Suites | POST | `/api/suites` | Create suite |
+| Suites | GET | `/api/suites/{suite_id}` | Suite detail |
+| Suites | PUT | `/api/suites/{suite_id}` | Update suite |
+| Suites | DELETE | `/api/suites/{suite_id}` | Delete suite |
+| Suite Run | POST | `/api/suites/{suite_id}/run` | Start suite run |
+| Suite Run | GET | `/api/suite_runs` | List suite runs |
+| Suite Run | GET | `/api/suite_runs/{suite_run_id}` | Suite run detail |
+| Suite Run | DELETE | `/api/suite_runs/{suite_run_id}` | Delete suite run |
+
+### WebSocket
+- `ws://127.0.0.1:8000/ws/run/{session_id}`: real-time log & screenshot stream
+
+### Internal APIs (Not for external use)
+| Method | Route | Notes |
+|---|---|---|
+| POST | `/api/internal/push_screenshot/{session_id}` | engine → server screenshot push |
+| POST | `/api/internal/push_heal_event/{session_id}` | engine → server heal event push |
 
 ## 👏 Acknowledgments
 

@@ -11,7 +11,7 @@
 
 *让 AI 接管脆弱的 CSS 选择器，用自然语言意图驱动你的端到端 (E2E) 测试。*
 
-[English Documentation](README_EN.md) · [核心特性](#-核心特性) · [快速开始](#-快速开始) · [架构设计](#-架构设计) · [工作流演示](#-工作流演示)
+[English Documentation](README_EN.md) · [核心特性](#-核心特性) · [快速开始](#-快速开始) · [控制台导览](#-控制台功能导览) · [API 概览](#-api-概览) · [架构设计](#-架构设计)
 
 </div>
 
@@ -50,7 +50,7 @@
 ai-web-tester/
 ├── src/ai_tester/              # 🐍 底层 Python 驱动与自愈引擎
 │   ├── agent.py                # AI 探索与意图理解引擎
-│   ├── healer.py               # AI 元素自愈引擎 (含评分机制与回写)
+│   ├── healer.py               # AI 元素自愈引擎 (含评分与自愈事件上报)
 │   ├── driver.py               # Playwright 动作封装
 │   └── inject/                 # JS 注入脚本：DOM 降维压缩提权
 ├── web_server/                 # 🚀 Web 后端 (FastAPI)
@@ -67,11 +67,21 @@ ai-web-tester/
 
 ---
 
+## 🧠 核心概念
+
+- **用例（Case）**：一个 JSON 文件，描述起始 URL + steps（动作序列）。文件默认落盘到 `tests/recorded_cases/`。
+- **步骤（Step）**：单个动作（click/input/assert...），推荐以 `intent` 描述“你想做什么”，`selector` 可为空。
+- **运行（Run）**：一次用例执行的结果与产物，默认落盘到 `tests/run_history/<run_id>/`，支持回放与审计。
+- **自愈（Heal）**：当 selector 失效/缺失时，引擎用 DOM（可选截图）+ intent 调用大模型寻找候选定位并继续执行。
+- **审计与回写（Approve）**：自愈结果不会自动写入用例；在 Web 控制台里对比自愈前/后截图后，一键“批准更新”写回 steps.selector（避免把不稳定 selector 误写入）。
+- **套件（Suite）**：多个用例按顺序组成的执行计划，可选前置用例（setup_case）用于登录等准备动作。
+- **Token 统计**：所有大模型调用统一记录 token_usage，在运行记录、套件汇总、自愈事件、修复建议等处展示，便于成本核算。
+
 ## 🚀 快速开始
 
 ### 1. 环境准备
 
-确保您的系统已安装 **Python 3.8+** 和 **Node.js**。
+确保您的系统已安装 **Python 3.8+** 和 **Node.js 18+**。
 
 克隆仓库后，配置 Python 虚拟环境并安装底层依赖：
 
@@ -126,6 +136,58 @@ npm run dev
 
 ---
 
+## 🧾 用例与套件格式
+
+### 用例 JSON（Case）
+
+用例默认保存在 `tests/recorded_cases/*.json`。基本结构：
+
+```json
+{
+  "id": "登录.json",
+  "name": "登录",
+  "start_url": "https://example.com/login",
+  "steps": [
+    { "type": "input", "selector": "", "value": "admin", "intent": "在用户名输入框输入账号" },
+    { "type": "input", "selector": "", "value": "123456", "intent": "在密码输入框输入密码" },
+    { "type": "click", "selector": "", "intent": "点击登录按钮" },
+    { "type": "assert", "assert_type": "text", "value": "登录成功", "intent": "页面提示登录成功" }
+  ]
+}
+```
+
+字段说明：
+- `type`：`click` / `input` / `wait` / `assert` / `hover` / `select_option` / `press_key` / `scroll` / `double_click` / `right_click`
+- `selector`：可为空。为空或失效时，会触发自愈（基于 `intent` 重新定位）
+- `intent`：推荐必填。越具体越稳定（例如“弹窗底部的确认按钮”比“确认按钮”更稳）
+- `value`：`input` 时为输入内容；`wait` 时为毫秒字符串；`assert` 时为断言目标文本/URL片段等
+- `assert_type`：`text` / `url` / `visible`
+
+### 套件 JSON（Suite）
+
+套件默认保存在 `tests/suites/*.json`：
+
+```json
+{
+  "id": "登录链路.json",
+  "name": "登录链路",
+  "env_id": null,
+  "setup_case_id": "登录.json",
+  "case_ids": ["登录.json", "授权.json"]
+}
+```
+
+---
+
+## 💾 数据目录与忽略规则（很重要）
+
+`tests/` 是运行时数据目录，通常包含业务用例与运行产物，默认不会提交到仓库：
+- `tests/recorded_cases/`：用例库（建议仅在公司内部仓库存放）
+- `tests/run_history/`：单次运行产物（meta.json、screenshots、token_usage.json）
+- `tests/suite_history/`：套件运行产物（meta.json、storage_state.json）
+
+仓库已在 `.gitignore` 中忽略 `tests/`，避免误提交公司项目数据。
+
 ## 🎥 工作流演示
 
 1. **创建/录制用例**：通过插件录制或在 Web 端手写步骤。每个步骤可以只有一个“自然语言意图”（如 `点击登录`），不需要填 `selector`。
@@ -136,6 +198,188 @@ npm run dev
 6. **失败修复建议**：如果运行失败，可生成 AI 修复建议（根因解释 + patched_steps），并一键应用到用例。
 
 ---
+
+## 🧭 控制台功能导览
+
+控制台是你日常工作的主入口，常用模块如下：
+
+### 用例大厅
+
+- **用例列表**：按名称/ID 搜索、按标签筛选与管理（标签用于组织业务用例）
+- **用例创建**：
+  - 新建空白用例（手工编排 steps）
+  - NL2Case：输入自然语言指令生成 steps（selector 初始可为空）
+- **运行历史**：展示该用例的单次运行记录，包含状态、耗时、Token；点击可进入回放
+
+### 用例编辑器
+
+- **步骤编辑**：维护 `type/selector/intent/value/assert_type` 等字段
+- **脚本视图**：查看后端动态生成的 pytest 脚本（用于排错与 CI 集成）
+- **保存/回滚**：保存用例 JSON 到本地数据目录（`tests/recorded_cases/`）
+
+### 运行与实时监控
+
+- **单用例运行**：一键执行；右侧实时输出日志与当前截图
+- **中止运行**：必要时停止 WebSocket 监控（不会自动回写任何 selector）
+
+### 回放与审计
+
+- **截图回放**：按时间轴查看本次运行截帧
+- **自愈记录**：展示每次自愈的 intent、旧/新 selector、评分原因、Token
+- **自愈审计大盘**：双屏对比“自愈前/后截图”（支持点击放大查看），确认无误后点 **批准更新** 写回用例 steps.selector
+- **Token 明细**：展示本次运行内所有 LLM 调用的 token_usage 列表与汇总
+- **失败修复建议**：失败后可生成 AI 修复建议，并支持一键应用到用例（patched_steps）
+
+### 套件（Suite）与执行计划
+
+- **套件管理**：创建套件、维护 case_ids 顺序、设置可选前置用例（setup_case）
+- **套件运行**：串行执行全部用例；失败继续跑；提供 suite 级别通过/失败/自愈/Token 汇总
+- **用例明细**：列出每个 case 的耗时、自愈次数、Token、状态，并可跳转到单个 run 回放
+
+### 设置与环境
+
+- **模型配置**：配置 `OPENAI_API_BASE / OPENAI_API_KEY / OPENAI_MODEL_NAME`，并提供连通性测试
+- **环境列表**：管理 base_url 环境并在运行时切换（用于一套用例跑多套部署环境）
+
+---
+
+## 🌐 API 概览
+
+后端默认监听 `http://127.0.0.1:8000`，前端通过同源代理调用（开发环境可直接访问）。
+
+### 业务 API（建议使用）
+
+| 模块 | 方法 | 路由 | 说明 |
+|---|---|---|---|
+| 配置 | GET | `/api/config` | 获取当前模型配置（从 `.env` 读取） |
+| 配置 | POST | `/api/config` | 保存模型配置（写入 `.env`） |
+| 配置 | POST | `/api/config/test` | 测试模型连通性（返回延迟与 token_usage） |
+| 环境 | GET | `/api/environments` | 获取环境列表（base_url） |
+| 环境 | POST | `/api/environments` | 保存环境列表 |
+| 用例 | GET | `/api/cases` | 列出用例（`tests/recorded_cases/`） |
+| 用例 | POST | `/api/cases` | 新建用例 |
+| 用例 | GET | `/api/cases/{case_id}` | 获取用例详情 |
+| 用例 | PUT | `/api/cases/{case_id}` | 更新用例 |
+| 用例 | DELETE | `/api/cases/{case_id}` | 删除用例 |
+| 用例 | POST | `/api/cases/{case_id}/rename` | 重命名用例 |
+| 用例 | POST | `/api/cases/generate` | NL2Case：自然语言生成 steps（返回 token_usage） |
+| 自愈 | POST | `/api/cases/{case_id}/heal/approve` | 审计通过后写回 selector（支持 old_selector 为空时按 intent 定位步骤） |
+| 脚本 | GET | `/api/cases/{case_id}/script` | 查看动态生成的 pytest 脚本 |
+| 运行 | POST | `/api/run/{case_id}` | 启动单用例运行（返回 run_id/session_id） |
+| 运行 | GET | `/api/runs?case_id=...` | 列出运行记录 |
+| 运行 | GET | `/api/runs/{run_id}` | 获取运行详情（logs、screenshots、heal_events、token_summary 等） |
+| 运行 | DELETE | `/api/runs/{run_id}` | 删除运行记录 |
+| 运行 | GET | `/api/runs/{run_id}/screenshots/{filename}` | 获取某张截图（base64） |
+| 修复建议 | POST | `/api/runs/{run_id}/ai_fix_suggest` | 生成失败用例修复建议（返回 token_usage） |
+| 套件 | GET | `/api/suites` | 列出套件 |
+| 套件 | POST | `/api/suites` | 新建套件 |
+| 套件 | GET | `/api/suites/{suite_id}` | 获取套件详情 |
+| 套件 | PUT | `/api/suites/{suite_id}` | 更新套件 |
+| 套件 | DELETE | `/api/suites/{suite_id}` | 删除套件 |
+| 套件运行 | POST | `/api/suites/{suite_id}/run` | 启动套件运行 |
+| 套件运行 | GET | `/api/suite_runs` | 列出套件运行记录 |
+| 套件运行 | GET | `/api/suite_runs/{suite_run_id}` | 获取套件运行详情（items、summary、token 汇总） |
+| 套件运行 | DELETE | `/api/suite_runs/{suite_run_id}` | 删除套件运行记录 |
+
+### WebSocket
+
+- `ws://127.0.0.1:8000/ws/run/{session_id}`：运行实时日志与截图推送
+
+### 内部接口（不建议外部调用）
+
+| 方法 | 路由 | 说明 |
+|---|---|---|
+| POST | `/api/internal/push_screenshot/{session_id}` | 引擎向服务端推送截图（供 WS 广播与落盘） |
+| POST | `/api/internal/push_heal_event/{session_id}` | 引擎向服务端推送自愈事件（供前端审计与落盘） |
+
+## ❓ 常见问题
+
+## ⚙️ 配置项与环境变量
+
+### `.env`（模型配置）
+
+项目根目录 `.env` 主要包含：
+
+```env
+OPENAI_API_BASE=https://models.inference.ai.azure.com
+OPENAI_API_KEY=xxxx
+OPENAI_MODEL_NAME=gpt-4o-mini
+```
+
+说明：
+- 只要你的模型服务兼容 OpenAI API 形式即可使用（本项目通过 LangChain 的 ChatOpenAI 适配）
+- 也可以直接在 Web 控制台的“设置”里填写，服务端会写入 `.env`
+
+### 运行相关环境变量（可选）
+
+| 变量 | 示例 | 说明 |
+|---|---|---|
+| `PLAYWRIGHT_HEADLESS` | `1` | 无头运行（1=无头，0/不设=有头） |
+| `AI_TESTER_STORAGE_STATE_PATH` | `tests/suite_history/<suite_run_id>/storage_state.json` | 套件运行时共享登录态（storageState） |
+| `AI_TESTER_RUN_DIR` | `logs/runs/20260415_120000/` | pytest 插件生成 HTML 报告与失败截图的输出目录 |
+
+---
+
+## 🧩 Chrome 插件录制指南
+
+插件目录在 `extension/`，用于把你在页面上的点击/输入转成 steps，并提示你补充每一步的 intent。
+
+推荐工作方式：
+1. 安装插件：Chrome → `chrome://extensions/` → 开发者模式 → 加载已解压 → 选择 `extension/`
+2. 打开待测系统页面，点击插件开始录制
+3. 每执行一步操作，按提示填写该步骤的 intent（越具体越稳）
+4. 停止录制后，产物会同步到 Web 控制台（你可以再在编辑器里补充/调整 steps）
+
+---
+
+## 🏃 命令行 / CI 运行建议
+
+控制台运行本质上是“动态生成 pytest 脚本并执行”。如果你要在 CI 里跑，建议采用：
+- 由控制台维护用例 JSON（公司内部仓库/私有目录）
+- 在 CI 里拉取代码 + 注入 `.env` + 提供 `tests/recorded_cases/` 数据目录
+
+核心命令：
+
+```bash
+pip install -r web_server/requirements.txt
+playwright install chromium
+python3 -m uvicorn web_server.app:app --host 127.0.0.1 --port 8000
+```
+
+然后通过 API 触发套件运行（推荐）：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/suites/<suite_id>/run"
+```
+
+### 1) 运行时报 Playwright 浏览器未安装
+
+```bash
+
+```bash
+playwright install chromium
+```
+
+### 2) 控制台提示未配置 OPENAI_API_KEY
+
+- 方式 A：在项目根目录创建 `.env`（推荐）
+- 方式 B：在 Web 控制台“设置”里配置（会写入 `.env`）
+
+### 3) 自愈后“看起来成功但其实点错了”
+
+- 检查该步骤 selector 是否过于宽泛（例如 `button`），这类 selector 可能点击到页面第一个按钮。
+- 推荐在“自愈审计大盘”里对比截图后再批准回写，必要时将 intent 写得更具体。
+
+### 4) 如何控制无头模式
+
+- 后端运行 pytest 时会读取 `PLAYWRIGHT_HEADLESS=1` 控制无头执行（默认开启无头）。
+
+---
+
+## 🔐 安全建议
+
+- 不要提交 `.env`、`tests/`、运行日志与截图产物。
+- 如果曾经误推送包含敏感信息的文件，即使重写历史也建议按公司流程处理（例如轮换密钥、通知相关方）。
 
 ## 👏 致谢 (Acknowledgments)
 
