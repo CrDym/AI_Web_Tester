@@ -58,7 +58,7 @@ function showClickFeedback(x, y, ok, label) {
     clickLayerEl.appendChild(pulse);
 
     const text = document.createElement("div");
-    text.className = "ai-tester-click-label";
+    text.className = "ai-tester-click-text";
     text.style.left = `${x}px`;
     text.style.top = `${y}px`;
     text.textContent = label || (ok ? "已记录" : "未记录");

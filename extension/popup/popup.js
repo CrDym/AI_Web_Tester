@@ -4,18 +4,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const stopBtn = document.getElementById('stop-btn');
     const clearBtn = document.getElementById('clear-btn');
     const statusText = document.getElementById('status-text');
+    const statusDot = document.getElementById('status-dot');
     const actionCount = document.getElementById('action-count');
 
     function updateUI() {
         chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
             if (res && res.isRecording) {
-                statusText.textContent = "录制中...";
+                statusText.textContent = "RECORDING...";
                 statusText.className = "recording";
+                statusDot.className = "dot recording";
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
             } else {
-                statusText.textContent = "已停止";
+                statusText.textContent = "SYSTEM STANDBY";
                 statusText.className = "";
+                statusDot.className = "dot";
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
             }
