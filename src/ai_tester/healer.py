@@ -1,3 +1,65 @@
+import re
+from typing import Optional
+
+def _sanitize_css_selector(selector: Optional[str]) -> Optional[str]:
+    if not isinstance(selector, str):
+        return None
+    s = selector.strip()
+    if not s:
+        return None
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        s = s[1:-1].strip()
+    s = s.replace('\\"', '"').replace("\\'", "'")
+    if not s:
+        return None
+    if len(s) > 500:
+        return None
+    if any(c in s for c in ("\n", "\r", "\t")):
+        return None
+    if s.endswith("\\"):
+        return None
+    if s.count('"') % 2 == 1:
+        return None
+    if s.count("'") % 2 == 1:
+        return None
+    if s.count("[") != s.count("]"):
+        return None
+    if s.count("(") != s.count(")"):
+        return None
+    if ":has-text" in s:
+        if not re.search(r":has-text\(\s*(['\"]).+?\1\s*\)", s):
+            return None
+    return s
+
+def _derive_selector_from_dom_tree(dom_tree_str: str, target_id: str) -> Optional[str]:
+    if not isinstance(dom_tree_str, str) or not isinstance(target_id, str):
+        return None
+    m = re.search(rf"^\s*-\s*\[{re.escape(target_id)}\]\s+([a-zA-Z0-9_-]+)\s+(.*)$", dom_tree_str, re.MULTILINE)
+    if not m:
+        return None
+    tag = (m.group(1) or "").strip()
+    rest = (m.group(2) or "").strip()
+    idm = re.search(r'id:"([^"]+)"', rest)
+    if idm:
+        v = idm.group(1).strip()
+        if v:
+            return f"#{v}"
+    namem = re.search(r'name:"([^"]+)"', rest)
+    if namem:
+        v = namem.group(1).strip()
+        if v:
+            return f'[name="{v}"]'
+    plm = re.search(r'pl:"([^"]+)"', rest)
+    if plm and tag:
+        v = plm.group(1).strip()
+        if v:
+            return f'{tag}[placeholder="{v}"]'
+    textm = re.search(r'^"([^"]+)"', rest)
+    if textm:
+        v = textm.group(1).strip()
+        if v:
+            return f'text="{v}"'
+    return None
 import os
 import json
 import os
@@ -25,29 +87,18 @@ class SelfHealer:
         self.llm = ChatOpenAI(
             model=final_model_name,
             temperature=temperature,
+            max_tokens=8192,
             api_key=os.environ.get("OPENAI_API_KEY"),
             base_url=os.environ.get("OPENAI_API_BASE")
         )
 
-        self.system_prompt = """
-You are an expert Web Automation Self-Healing Engine.
-A test script failed to locate an element using the provided `original_selector` because the UI has changed.
-You will be given:
-1. `original_selector`: The selector that used to work (e.g., '#btn-submit-v1').
-2. `element_description`: A natural language description of what the element is supposed to do (e.g., 'The login submit button').
-3. `current_dom`: A compressed DOM tree (Accessibility Tree) of the current page, where each element has an `[id]`.
-4. A screenshot of the current page (if vision is enabled).
-
-Your task is to find the most likely new element in the `current_dom` that corresponds to the missing element.
-
-Return ONLY a JSON object in this exact format:
-{
-    "success": true/false,
-    "new_target_id": "the ID of the matched element, or null if not found",
-    "reason": "brief explanation of why you chose this element",
-    "new_selector": "Provide a reliable CSS selector for this new element. Prioritize data-testid, role, or aria attributes. Avoid overly complex structural paths if possible. Ensure it is unique."
-}
-"""
+        prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', 'healer_system_prompt.txt')
+        try:
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                self.system_prompt = f.read().strip()
+        except Exception as e:
+            logger.warning(f"⚠️ 无法加载系统提示词文件 {prompt_path}: {e}，将使用内置的 Fallback 提示词。")
+            self.system_prompt = "You are a Web Automation Self-Healing Engine. Output JSON."
 
     def _push_heal_event(self, payload: Dict[str, Any]) -> None:
         try:
@@ -70,42 +121,6 @@ Return ONLY a JSON object in this exact format:
         unique_string = f"{original_selector}_{element_description}"
         return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
 
-    def _rewrite_code_file(self, original_selector: str, new_selector: str) -> None:
-        """
-        自动代码回写机制：将 Python 测试文件中失效的 original_selector 替换为 new_selector
-        """
-        import inspect
-        import os
-        
-        caller_frame = None
-        for frame in inspect.stack():
-            # 找到调用 healer.heal 的业务测试代码文件
-            if frame.filename.endswith('.py') and not frame.filename.endswith('healer.py') and not frame.filename.endswith('agent.py') and not 'pytest' in frame.filename:
-                caller_frame = frame
-                break
-                
-        if not caller_frame:
-            return
-            
-        file_path = caller_frame.filename
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
-            # 简单的字符串替换
-            if new_selector == original_selector:
-                return
-                
-            if f'"{original_selector}"' in content or f"'{original_selector}'" in content:
-                new_content = content.replace(f'"{original_selector}"', f'"{new_selector}"')
-                new_content = new_content.replace(f"'{original_selector}'", f'"{new_selector}"')
-                
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                logger.info(f"✨ [自愈回写] 成功将代码中的失效定位器 '{original_selector}' 永久修复为 '{new_selector}'")
-        except Exception as e:
-            logger.warning(f"⚠️ [自愈回写] 代码替换失败: {e}")
-
     def heal(self, original_selector: str, element_description: str, dom_tree_str: str, screenshot_base64: str = None) -> Optional[str]:
         """
         触发元素自愈机制，返回新的 AI ID
@@ -117,7 +132,9 @@ Return ONLY a JSON object in this exact format:
         # 1. 尝试从本地缓存中读取已经自愈过的结果
         # 优化: 如果 original_selector 为空（自然语言新建的用例），我们不使用缓存，强制让大模型重新走一遍推理
         cache_file = None
-        if original_selector and str(original_selector).strip() and str(original_selector).strip() != "null":
+        ignore_cache = os.environ.get("AI_TESTER_IGNORE_CACHE") == "1"
+        
+        if not ignore_cache and original_selector and str(original_selector).strip() and str(original_selector).strip() != "null":
             cache_key = self._get_cache_key(original_selector, element_description)
             cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
             
@@ -126,7 +143,8 @@ Return ONLY a JSON object in this exact format:
                     with open(cache_file, 'r', encoding='utf-8') as f:
                         cached_data = json.load(f)
                         
-                    if cached_data.get("new_selector"):
+                    # 如果缓存中的新选择器和原本失效的选择器一模一样，说明这个缓存是无意义的“脏数据”，忽略它
+                    if cached_data.get("new_selector") and cached_data.get("new_selector") != original_selector:
                         logger.info(f"   ⚡ 命中本地自愈缓存! 直接使用上次自愈成功的选择器: '{cached_data['new_selector']}'")
                         token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                         self._push_heal_event({
@@ -185,11 +203,105 @@ Please find the new `id` (the number inside the brackets, e.g., 8, 9, 10) for th
             elif content.startswith("```"):
                 content = content[3:-3].strip()
                 
-            result = json.loads(content)
+            # 引入健壮的 JSON 解析
+            import re
+            raw = (content or "").strip()
+            fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+            if fence_match:
+                raw = fence_match.group(1).strip()
+            raw = raw.strip("\ufeff").strip()
+
+            candidates = []
+            try:
+                inner = json.loads(raw)
+                if isinstance(inner, str):
+                    candidates.append(inner.strip())
+            except Exception:
+                pass
+            candidates.append(raw)
+            if "{" in raw and "}" in raw:
+                candidates.append(raw[raw.find("{"):raw.rfind("}") + 1])
+                
+            idx = raw.find('"success"')
+            if idx != -1:
+                frag = raw[idx:].strip()
+                if not frag.startswith("{"):
+                    frag = "{" + frag
+                if not frag.endswith("}"):
+                    frag = frag + "}"
+                candidates.append(frag)
+
+            decoder = json.JSONDecoder()
+            result = None
+            
+            for cand in candidates:
+                try:
+                    s = (cand or "").strip()
+                    if not s:
+                        continue
+                    if not (s.startswith("{") or s.startswith("[")):
+                        if "{" in s:
+                            s = s[s.find("{") :]
+                        else:
+                            if not s.startswith("{"):
+                                s = "{" + s
+                            if not s.endswith("}"):
+                                s = s + "}"
+                    obj, _ = decoder.raw_decode(s)
+                    if isinstance(obj, dict):
+                        result = obj
+                        break
+                except Exception:
+                    continue
+
+            if not isinstance(result, dict):
+                try:
+                    lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
+                    obj = {}
+                    for ln in lines:
+                        m = re.match(r'^"([^"]+)"\s*:\s*(.+?)\s*,?$', ln)
+                        if not m:
+                            continue
+                        k = m.group(1)
+                        v_raw = m.group(2).strip()
+                        if v_raw in ("true", "false", "null"):
+                            v = {"true": True, "false": False, "null": None}[v_raw]
+                        else:
+                            try:
+                                v = json.loads(v_raw)
+                            except Exception:
+                                v = v_raw.strip('"')
+                        obj[k] = v
+                    if obj:
+                        if "success" not in obj:
+                            nt = obj.get("new_target_id")
+                            obj["success"] = bool(nt)
+                        result = obj
+                except Exception:
+                    result = None
+
+            if not isinstance(result, dict):
+                logger.error(f"❌ 自愈引擎 JSON 解析彻底失败: 无法从大模型输出中提取 JSON 对象。原始输出:\n{content}")
+                raise ValueError("JSON parse failed")
             
             if result.get("success") and result.get("new_target_id"):
                 new_id = str(result["new_target_id"])
-                new_selector = result.get("new_selector")
+                new_selector = _sanitize_css_selector(result.get("new_selector"))
+                derived_selector = _derive_selector_from_dom_tree(dom_tree_str, new_id)
+                if derived_selector:
+                    # 如果 AI 给出的 new_selector 和失效的 original_selector 一模一样，这说明 AI 虽然找到了元素，但生成新选择器的能力不行
+                    # 此时必须强制使用底层反推出来的 derived_selector
+                    if new_selector == original_selector:
+                        logger.warning(f"⚠️ AI 生成的新选择器 '{new_selector}' 与失效的旧选择器完全相同！已强制回退使用底层 DOM 反推选择器: '{derived_selector}'")
+                        new_selector = derived_selector
+                    elif not new_selector:
+                        new_selector = derived_selector
+                    elif new_selector == "#basic":
+                        new_selector = derived_selector
+                    elif derived_selector.startswith("#") and (not new_selector or (new_selector.startswith("#basic") and derived_selector.startswith("#basic_") and len(derived_selector) > len(new_selector))):
+                        new_selector = derived_selector
+                    elif any(k in new_selector for k in ("nth-child", "last-child", ">")) and not any(k in derived_selector for k in ("nth-child", "last-child", ">")):
+                        new_selector = derived_selector
                 
                 # 简单评分机制：如果包含特定属性，则认为比较稳定
                 score = 50
@@ -218,7 +330,10 @@ Please find the new `id` (the number inside the brackets, e.g., 8, 9, 10) for th
                 
                 # 3. 将大模型找到的新选择器写入本地缓存（低分不自动缓存与回写）
                 if new_selector and cache_file:
-                    if score >= 50:
+                    # 如果新选择器和旧的完全一样，坚决不写入缓存，防止产生脏缓存
+                    if new_selector == original_selector:
+                        logger.warning(f"   ⚠️ 新选择器与原选择器一致 ('{new_selector}')，拒绝写入本地自愈缓存。")
+                    elif score >= 50:
                         logger.info(f"   💾 已将新选择器 '{new_selector}' 写入本地缓存，下次执行将直接使用。")
                         try:
                             with open(cache_file, 'w', encoding='utf-8') as f:
@@ -231,14 +346,10 @@ Please find the new `id` (the number inside the brackets, e.g., 8, 9, 10) for th
                                 }, f, ensure_ascii=False, indent=2)
                         except Exception as e:
                             logger.warning(f"   ⚠️ 写入自愈缓存失败: {str(e)}")
-                            
-                        # 触发自动代码修复
-                        if new_selector != original_selector:
-                            self._rewrite_code_file(original_selector, new_selector)
                     else:
                         logger.warning(f"   ⚠️ 新选择器 '{new_selector}' 稳定性评分过低 ({score})，本次生效但拒绝自动写入缓存与回写。")
                         
-                return f"SELECTOR:{new_selector}" if new_selector else new_id
+                return f"SELECTOR:{new_selector}" if new_selector else str(new_id)
             else:
                 logger.error(f"   ❌ 自愈失败. 原因: {result.get('reason')}")
                 self._push_heal_event({

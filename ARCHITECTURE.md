@@ -57,6 +57,10 @@
 5. **Token 统计**
    - 所有大模型调用会记录 Token 使用情况，并在单次运行记录与套件汇总中展示总计与明细，便于成本核算与优化。
 
+6. **探索模式 (Explore)**
+   - 用于全新页面/全新流程的“先跑通再固化”：后端启动探索 run，脚本调用 `src/ai_tester/agent.py` 基于“可交互元素清单快照”迭代决策动作。
+   - 探索过程中会持续推送日志与截图；探索完成后落盘 `explore_actions.json` 并生成可回归的用例 JSON（含 selector 与 intent），进入正常回归链路。
+
 ## 技术栈
 - **Frontend**: React 18, Vite, TailwindCSS, Lucide React, react-syntax-highlighter
 - **Backend**: FastAPI, Uvicorn, LangChain

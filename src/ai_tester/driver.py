@@ -109,9 +109,10 @@ class PlaywrightDriver:
                             el['bbox']['y'] += frame_offset_y
                     all_elements.extend(elements)
                     current_id += len(elements)
-            except Exception:
-                # 对于跨域的 iframe (cross-origin)，执行 evaluate 可能会抛出异常，这里做静默降级处理
-                pass
+            except Exception as e:
+                # 对于跨域的 iframe (cross-origin)，执行 evaluate 可能会抛出异常，这里做降级处理，并打印一条日志提醒
+                from .logger import logger
+                logger.debug(f"   ⚠️ 跳过受限 Iframe ({frame.url}): {str(e)[:50]}...")
                 
         return {"elements": all_elements}
 
@@ -130,6 +131,12 @@ class PlaywrightDriver:
         target_locator = None
         if selector is not None:
             target_locator = self._get_locator(selector)
+        else:
+            # 修复：防止 action(None, value) 导致的底层库原生的 AttributeError
+            # 如果是全局动作（如 scroll / wait），动作函数内部本身不会使用 locator，传 None 没问题
+            # 但如果是必须需要定位的动作（如 click / type）但大模型却传了 null，我们这里同样给它一个假锚点触发自愈或报错
+            if action not in ["scroll", "wait"]:
+                target_locator = self.page.locator("#_trigger_ai_heal_not_exist_999")
 
         for attempt in range(2):
             try:
@@ -160,12 +167,14 @@ class PlaywrightDriver:
             return self.page.locator("#_trigger_ai_heal_not_exist_999")
             
         try:
+            # 移除 `.first`，不再默默使用第一个元素。
+            # 这会让 Playwright 在匹配多个元素时抛出 Strict mode violation 错误，从而触发外层的 AI 自愈
             if self.page.locator(selector).count() > 0:
-                return self.page.locator(selector).first
+                return self.page.locator(selector)
             
             for frame in self.page.frames:
                 if frame.locator(selector).count() > 0:
-                    return frame.locator(selector).first
+                    return frame.locator(selector)
         except Exception:
             # 如果选择器语法错误（例如 AI 瞎编的），这里直接捕获并返回 page 根级别的 locator
             # 让后面的操作抛出具体的失败异常，触发自愈，而不是在这里直接挂掉进程
@@ -215,12 +224,29 @@ class PlaywrightDriver:
     # --- 内置动作处理器 ---
     def _action_click(self, locator, value, force=False):
         # 默认 timeout 为 3000ms，这样如果元素被遮挡或者逻辑不可见，能快速失败并重试 force=True
-        # 如果是 :contains 伪类且抛出严格模式(Strict mode)错误（找到多个），取第一个
         try:
+            # 移除这段导致“假阳性成功”的容错代码，如果匹配到多个元素，让 Playwright 直接抛出 Strict mode violation 错误，触发自愈
             locator.click(force=force, timeout=3000)
         except Exception as e:
-            if "strict mode violation" in str(e).lower() and locator.count() > 1:
-                locator.first.click(force=force, timeout=3000)
+            err_msg = str(e).lower()
+            if "strict mode violation" in err_msg:
+                # 严禁默默点击第一个元素！这会导致业务逻辑没走到，直接抛出异常让外层自愈
+                raise Exception(f"定位器匹配到了多个元素，违反了唯一性原则，无法执行点击: {str(e)}")
+            elif "timeout" in err_msg and not force:
+                # 第一次尝试超时，直接抛出给外层进行 force=True 的重试
+                raise e
+            elif "timeout" in err_msg and force:
+                # 即使是 force=True 也超时了，说明该元素极大概率由于 DOM 重绘导致 stale (如下拉框关闭、React 重新渲染)
+                # 此时我们尝试利用页面上最新的相同 selector 重新获取一遍元素（Stale Element Recovery）
+                selector = str(locator).replace("Locator@", "").strip()
+                if "ai-id" in selector:
+                    # 如果是 ai-id 超时，说明临时注入的 id 已经随着重绘彻底消失了，无法 recovery，只能认命
+                    raise Exception(f"元素已失效或不可见 (可能已从 DOM 中移除或发生重绘): {selector}")
+                
+                try:
+                    self.page.locator(selector).first.click(force=True, timeout=1000)
+                except Exception:
+                    raise e
             else:
                 raise e
         self.page.wait_for_timeout(500)  # 等待可能的弹窗/下拉框动画
@@ -246,9 +272,16 @@ class PlaywrightDriver:
                 pass
             # 直接使用全局键盘敲击，只要元素被 click 聚焦了就能接收到输入
             self.page.keyboard.type(value, delay=50)
-        except Exception:
-            # 兜底方案
-            locator.fill(value, force=force, timeout=3000)
+        except Exception as e:
+            # 兜底方案：如果 click(聚焦) 失败（比如因为是隐藏的 input 或者遮挡），尝试直接用 fill
+            # 注意：这里直接用 fill，并且允许 timeout 向上抛出以触发 AI 自愈
+            try:
+                locator.fill(value, force=force, timeout=3000)
+            except Exception as fill_err:
+                # 避免 AttributeError 掩盖真实问题
+                if "AttributeError" in str(fill_err):
+                    raise e # 抛出原来的 click 异常
+                raise fill_err
         self.page.wait_for_timeout(500)
 
     def _action_hover(self, locator, value, force=False):

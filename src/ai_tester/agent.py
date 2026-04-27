@@ -29,8 +29,10 @@ class AITesterAgent:
         self.llm = ChatOpenAI(
             model=final_model_name,
             temperature=temperature,
+            max_tokens=2048,
             api_key=os.environ.get("OPENAI_API_KEY", "your-api-key-here"),
-            base_url=os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
+            base_url=os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
+            model_kwargs={"response_format": {"type": "json_object"}}
         )
 
         self.system_prompt = self._load_system_prompt()
@@ -49,10 +51,16 @@ class AITesterAgent:
             logger.warning(f"⚠️ 无法加载系统提示词文件 {prompt_path}: {e}，将使用内置的 Fallback 提示词。")
             return "You are a Web Automation Agent. Output JSON format."
 
-    def _build_tree_str(self, page_data: Dict[str, Any]) -> str:
+    def _build_tree_str(self, page_data: Dict[str, Any], max_length: int = 20000) -> str:
         """将提取的字典转换为大模型易读且极度省 Token 的 YAML/Markdown 混合字符串"""
         tree_str = "Viewport Interactive Elements:\n"
-        for el in page_data.get('elements', []):
+        
+        elements = page_data.get('elements', [])
+        # 如果 elements 带有 weight 属性，按重要性排序；否则按原本顺序
+        if elements and "weight" in elements[0]:
+            elements = sorted(elements, key=lambda x: x.get("weight", 0), reverse=True)
+            
+        for el in elements:
             role_text = el.get('role', '') or el.get('type', '')
             # 精简：移除冗长属性，只保留关键的辅助信息
             text_desc = f"\"{el.get('text', '')}\"" if el.get('text') else ""
@@ -66,7 +74,18 @@ class AITesterAgent:
             # 使用类似于 agent-browser 的紧凑文本格式
             # 格式例如: - [1] button "Login"
             role_str = f"({role_text})" if role_text else ""
-            tree_str += f"- [{el['id']}] {el['tag']} {text_desc} {role_str}\n"
+            
+            # 增加层级/容器提示 (如果存在)
+            container_hint = ""
+            if el.get('in_iframe'): container_hint += " [iframe内]"
+            if el.get('container_hint'): container_hint += f" [{el['container_hint']}]"
+            
+            line = f"- [{el['id']}] {el['tag']} {text_desc} {role_str}{container_hint}\n"
+            if len(tree_str) + len(line) > max_length:
+                tree_str += f"\n...[内容过长，已截断并丢弃权重较低的 {len(elements) - elements.index(el)} 个元素]..."
+                break
+            tree_str += line
+            
         return tree_str
 
     def get_dom_tree_str(self) -> str:
@@ -102,15 +121,22 @@ class AITesterAgent:
                 
             # 找到调用 agent.step 的那一行
             step_line_idx = -1
-            for i, line in enumerate(lines):
-                if 'agent.step(' in line and intent[:20] in line: # 简单匹配意图前缀
-                    step_line_idx = i
-                    break
+            # 改进：利用 inspect 获取实际的调用行号，防止字符串匹配错误覆盖其他用例
+            target_line_number = caller_frame.lineno - 1  # lineno 是 1-based，转为 0-based
+            if 0 <= target_line_number < len(lines):
+                if 'agent.step' in lines[target_line_number]:
+                    step_line_idx = target_line_number
+                else:
+                    # 如果是多行调用，向上寻找 `agent.step` 所在的起始行
+                    for i in range(target_line_number, max(-1, target_line_number - 10), -1):
+                        if 'agent.step' in lines[i]:
+                            step_line_idx = i
+                            break
             
-            # 如果单行匹配失败，尝试寻找上文的 intent 变量定义
             if step_line_idx == -1:
+                # Fallback：用原来的字符串匹配方式
                 for i, line in enumerate(lines):
-                    if 'agent.step(' in line:
+                    if 'agent.step(' in line and intent[:20] in line: # 简单匹配意图前缀
                         step_line_idx = i
                         break
                         
@@ -148,10 +174,11 @@ class AITesterAgent:
                 elif action == "select_option":
                     generated_code.append(f"{indent}page.select_option({selector_lit}, {value_lit})\n")
                 elif action == "drag_and_drop":
-                    # value is target_id to drop on
-                    target_selector = f"[ai-id='{value}']"
-                    if target_selector:
-                        generated_code.append(f"{indent}page.drag_and_drop({selector_lit}, {json.dumps(target_selector)})\n")
+                    # ⚠️ 修复：不能将临时的 ai-id 写死到原生代码中，因为下次执行必定找不到
+                    # 由于我们在 `action_sequence` 缓存里只存了源元素的 css_selector，这里简单降级为拖拽到 body
+                    # 如果后续业务需要精准拖拽，建议在 agent 返回时额外要求附带目标元素的特征
+                    target_selector = "body"
+                    generated_code.append(f"{indent}page.drag_and_drop({selector_lit}, {json.dumps(target_selector)})\n")
                 elif action == "scroll":
                     generated_code.append(f"{indent}page.mouse.wheel(0, 500)\n")
                 elif action == "wait":
@@ -162,26 +189,45 @@ class AITesterAgent:
             generated_code.append(f"{indent}# ------------------------------------------------------------\n")
             
             # 将 agent.step 那行注释掉
-            # 改进正则，处理 `success = agent.step(...)` 的情况
             if not lines[step_line_idx].strip().startswith('#'):
-                lines[step_line_idx] = re.sub(r'(^|\s)([\w\s,]*=\s*)?agent\.step', r'\1# \2agent.step', lines[step_line_idx], count=1)
+                # 提取原有的缩进和可能的变量赋值 (如 `success = `)
+                match = re.match(r'^(\s*)([\w\s,]*=\s*)?agent\.step', lines[step_line_idx])
+                if match:
+                    prefix = match.group(1) or ""
+                    assignment = match.group(2) or ""
+                    # 重新拼接并加上注释符号
+                    lines[step_line_idx] = f"{prefix}# {assignment}agent.step" + lines[step_line_idx][match.end():]
                 
             # 插入生成的代码
             lines.insert(step_line_idx + 1, "".join(generated_code))
             
-            # 写回文件
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
+            # 写回文件（使用原子写入保护防止崩溃清空文件）
+            import tempfile
+            import shutil
+            fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(file_path))
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+                shutil.move(temp_path, file_path)
+            except Exception as write_err:
+                os.remove(temp_path)
+                raise write_err
                 
             logger.info(f"✨ 成功将 AI 探索成果自动回写至代码: {os.path.basename(file_path)}")
             
         except Exception as e:
             logger.warning(f"⚠️ 代码回写失败: {e}")
 
-    def _get_intent_cache_key(self, intent: str) -> str:
-        """生成意图的缓存唯一键值"""
+    def _get_intent_cache_key(self, intent: str, url: str) -> str:
+        """生成意图的缓存唯一键值，结合当前页面的基础URL，防止不同页面的同名意图冲突"""
         import hashlib
-        return hashlib.md5(intent.encode('utf-8')).hexdigest()
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        key_str = f"{base_url}::{intent}"
+        
+        return hashlib.md5(key_str.encode('utf-8')).hexdigest()
 
     def step(self, intent: str, max_steps: int = 10) -> bool:
         """
@@ -194,7 +240,10 @@ class AITesterAgent:
         # 0. 尝试缓存回放机制 (Record & Replay)
         cache_dir = ".intent_cache"
         os.makedirs(cache_dir, exist_ok=True)
-        cache_key = self._get_intent_cache_key(intent)
+        
+        # 获取当前基础 URL 以构建缓存键
+        current_url = self.driver.page.url
+        cache_key = self._get_intent_cache_key(intent, current_url)
         cache_file = os.path.join(cache_dir, f"{cache_key}.json")
         
         # 允许外部通过环境变量强制绕过缓存 (用于调试特定步骤)
@@ -218,7 +267,9 @@ class AITesterAgent:
                             # 全局动作直接执行，忽略 selector
                             self.driver.perform_action(action, "null", value)
                         else:
-                            self.driver.perform_action(action, f"SELECTOR:{selector}", value)
+                            # 修复：防止 selector 为 None 时拼出 "SELECTOR:None" 导致定位崩溃
+                            safe_selector = selector if selector else "body"
+                            self.driver.perform_action(action, f"SELECTOR:{safe_selector}", value)
                         self.driver.page.wait_for_timeout(1000)
                     except Exception as e:
                         logger.warning(f"   ⚠️ 重放动作失败: {e}，将回退到大模型自主探索模式。")
@@ -244,6 +295,12 @@ class AITesterAgent:
             logger.info(f"--- 步骤 {step_idx + 1} ---")
             run_context.record_event("step_start", f"{intent} / step {step_idx + 1}")
             
+            # 全局熔断机制：如果该 Agent 的总 Token 消耗已经超过 50 万，则强行熔断，防止账单爆炸
+            if getattr(self, 'total_tokens', 0) > 500000:
+                logger.error("🛑 全局 Token 消耗超过 500k 限制，触发硬性熔断！请检查是否有死循环。")
+                run_context.record_event("token_limit_exceeded", f"Total tokens: {self.total_tokens}")
+                return False
+            
             # 智能视觉回退 (Auto Vision Fallback)
             # 如果连续失败(或者连续执行了重复无效动作)达到了 2 次，且允许自动开启视觉
             if self.auto_vision and not current_use_vision and consecutive_failures >= 2:
@@ -254,17 +311,23 @@ class AITesterAgent:
                 
             # 1. 提取当前页面状态（核心：DOM压缩降维）
             page_data = self.driver.get_dom_snapshot()
-            dom_tree_str = self._build_tree_str(page_data)
+            if os.environ.get("AI_TESTER_LIVE_SNAPSHOT") == "1":
+                try:
+                    self.driver.get_screenshot([])
+                except Exception:
+                    pass
+            dom_tree_str = self._build_tree_str(page_data, max_length=20000)
             
-            # 这里截取一部分打印，避免刷屏
             # 计算 token 大致数量（1 token 约等于 4 字符）
             approx_tokens = len(dom_tree_str) // 4
             logger.debug(f"当前视口 DOM 快照已提取，约 {approx_tokens} Tokens。")
             
-            history_str = "历史动作记录:\n" + ("\n".join(action_history) if action_history else "无")
+            # 为了防止历史记录过长影响大模型的判断和 Token 消耗，只保留最近的 5 次动作
+            recent_history = action_history[-5:] if action_history else []
+            history_str = "最近动作记录:\n" + ("\n".join(recent_history) if recent_history else "无")
             
             # 2. 构造 Prompt 发送给大模型
-            user_prompt = f"用户意图: {intent}\n\n{history_str}\n\n{dom_tree_str}\n\nWhat is the NEXT action?"
+            user_prompt = f"用户意图: {intent}\n\n{history_str}\n\n{dom_tree_str}\n\nWhat is the NEXT action? Remember to provide your `thought` process first."
             
             if current_use_vision:
                 import base64
@@ -325,13 +388,27 @@ class AITesterAgent:
                     self.total_tokens += step_tokens
                     logger.info(f"📊 本步 Token 消耗: Prompt={usage.get('prompt_tokens', 0)}, Completion={usage.get('completion_tokens', 0)}, 总计={step_tokens}")
                 
-                # 尝试清理可能的 Markdown 格式
-                if content.startswith("```json"):
-                    content = content[7:-3].strip()
-                elif content.startswith("```"):
-                    content = content[3:-3].strip()
+                # 使用正则安全提取 JSON，优先匹配 ```json 块，否则匹配最外层的 {} (非贪婪)
+                import re
+                json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', content)
+                if json_match:
+                    content = json_match.group(1)
+                else:
+                    json_match = re.search(r'\{[\s\S]*?\}', content)
+                    if json_match:
+                        content = json_match.group(0)
+                    else:
+                        # 终极兜底：如果模型完全没输出 {}，尝试手动给它包一层
+                        if content.startswith('"thought"'):
+                            content = "{" + content + "}"
                     
                 action_data = json.loads(content)
+                
+                # 提取思维链并打印
+                thought = action_data.get("thought", "")
+                if thought:
+                    logger.info(f"🧠 AI 思考过程: {thought}")
+                    
             except Exception as e:
                 logger.error(f"❌ 解析大模型响应失败: {str(e)}\n原始响应: {response.content if 'response' in locals() else 'None'}")
                 logger.info(f"🏁 本次意图累计消耗 Token: {intent_tokens}, Agent 全局累计消耗: {self.total_tokens}")
@@ -339,10 +416,14 @@ class AITesterAgent:
                 return False
                 
             action = action_data.get("action")
-            target_id = action_data.get("target_id")
+            target_id_raw = action_data.get("target_id")
+            target_id = "null" if target_id_raw is None else str(target_id_raw)
             value = action_data.get("value")
+            step_intent = action_data.get("intent")
             
             logger.info(f"🤖 大模型决策: 动作={action}, 目标ID=[{target_id}], 输入值={value}")
+            if thought:
+                run_context.record_event("llm_thought", thought)
             run_context.record_event("llm_action", f"action={action} target_id={target_id} value={value}", token_usage=step_usage or None)
             
             # 找到对应 target_id 的 css_selector，供缓存记录使用
@@ -375,32 +456,52 @@ class AITesterAgent:
             # 3. 执行动作
             try:
                 prev_url = self.driver.page.url
-                self.driver.perform_action(action, str(target_id), value)
+                self.driver.perform_action(action, target_id, value)
                 action_record = f"动作: {action}, 目标ID: [{target_id}], 输入值: {value}"
                 new_url = self.driver.page.url
                 
                 # 执行成功，则将它加入到缓存队列中
-                action_sequence_for_cache.append({
-                    "action": action,
-                    "selector": css_selector or "body",
-                    "value": value
-                })
+                if action != "done":
+                    # 如果是全局动作(如按键、滚动页面)，target_id 是 null，不需要默认降级为 body
+                    fallback_selector = "" if target_id == "null" else "body"
+                    action_sequence_for_cache.append({
+                        "action": action,
+                        "selector": css_selector or fallback_selector,
+                        "value": value,
+                        "intent": step_intent
+                    })
                 
                 if prev_url != new_url and consecutive_failures > 0:
-                    consecutive_failures = max(0, consecutive_failures - 1)
+                    from urllib.parse import urlparse
+                    prev_parsed = urlparse(prev_url)
+                    new_parsed = urlparse(new_url)
+                    # 只有 path 及以上级别的改变，或者强业务跳转才重置死循环计数。如果只是 hash 改变 (#tab1) 不清空计数，防止在同一个页面死循环
+                    if f"{prev_parsed.scheme}://{prev_parsed.netloc}{prev_parsed.path}" != f"{new_parsed.scheme}://{new_parsed.netloc}{new_parsed.path}":
+                        consecutive_failures = 0
 
                 # 检查是否陷入死循环 (比如连续3次点击同一个元素却没有完成意图)
-                if len(action_history) >= 2 and all(record.split(" (⚠️")[0] == action_record for record in action_history[-2:]):
+                # 修复：死循环检测不应该使用包含临时 ai-id 的 target_id，而应该使用 css_selector，防止页面重绘导致同一个元素被分配了不同的 ai-id 从而绕过死循环检测
+                loop_detect_key = f"{action}|{css_selector or target_id}|{value}"
+                
+                recent_loop_keys = [record.split(" (⚠️")[0] for record in action_history[-3:]] if action_history else []
+                
+                if len(recent_loop_keys) >= 2 and all(r == loop_detect_key for r in recent_loop_keys[-2:]):
                     consecutive_failures += 1.5
-                    logger.warning(f"⚠️ 检测到大模型可能陷入重复动作的死循环 ({action_record})")
+                    logger.warning(f"⚠️ 检测到大模型可能陷入重复动作的死循环 ({loop_detect_key})")
                     action_record += " (⚠️ 警告: 该动作未产生预期效果，陷入死循环！请尝试滚动页面、更换策略或返回 done)"
                     run_context.record_event("dead_loop", action_record)
+                # 检测交替动作死循环 (A -> B -> A -> B)
+                elif len(recent_loop_keys) == 3 and recent_loop_keys[0] == recent_loop_keys[2] and recent_loop_keys[1] == loop_detect_key:
+                    consecutive_failures += 1.5
+                    logger.warning(f"⚠️ 检测到大模型陷入交替动作死循环 (A->B->A->B)")
+                    action_record += " (⚠️ 警告: 动作在两个元素间来回交替未见进展，请更换探索策略！)"
+                    run_context.record_event("dead_loop", action_record)
                 else:
-                    # 动作看起来是新的，稍微减少一点失败计数，但如果之前是连续报错的则保留
-                    if consecutive_failures > 0:
-                        consecutive_failures -= 0.5
+                    # 动作看起来是新的，清空失败计数，避免历史累积导致误判
+                    consecutive_failures = 0
                 
-                action_history.append(action_record)
+                # action_history 存入带特征的 loop_detect_key 作为开头，方便下次取用比对，后续接上中文描述给大模型看
+                action_history.append(f"{loop_detect_key} (⚠️ {action_record})") if "⚠️" in action_record else action_history.append(f"{loop_detect_key} -- {action_record}")
                 # 等待页面稳定
                 # 这里如果动作是 type，我们额外多等一会儿，因为下拉框搜索往往有防抖延迟
                 if action == "type":
@@ -413,12 +514,24 @@ class AITesterAgent:
                     run_context.record_event("intent_end", f"{intent} (aborted)", extra={"intent_tokens": intent_tokens, "agent_total_tokens": self.total_tokens})
                     return False
             except Exception as e:
-                logger.warning(f"⚠️ 动作执行失败: {str(e)}")
-                action_history.append(f"执行失败: {action} 于 [{target_id}] - 错误: {str(e)}")
-                consecutive_failures += 1
-                run_context.record_event("action_error", f"{action} target_id={target_id} err={str(e)}")
+                err_msg = str(e)
+                logger.warning(f"⚠️ 动作执行失败: {err_msg}")
+                # 如果是 Stale Element (元素失效) 或 Timeout 错误，我们在历史记录里提示大模型，防止它一直死磕
+                if "timeout" in err_msg.lower() or "已失效或不可见" in err_msg:
+                    action_history.append(f"执行失败: {action} 于 [{target_id}] - 错误: 元素可能已被遮挡或由于页面重绘而消失。请尝试滚动页面、重新打开下拉框，或选择页面上最新生成的其他元素。")
+                else:
+                    action_history.append(f"执行失败: {action} 于 [{target_id}] - 错误: {err_msg}")
                 
-                if consecutive_failures >= 3:
+                consecutive_failures += 1
+                run_context.record_event("action_error", f"{action} target_id={target_id} err={err_msg}")
+                
+                # 如果遇到错误且开启了智能视觉，自动开启视觉并重试
+                if self.auto_vision and not current_use_vision and consecutive_failures >= 2:
+                    logger.warning("👀 纯文本 DOM 分析连续受挫，框架已自动开启【多模态视觉+红框标注】进行降维打击！")
+                    current_use_vision = True
+                    consecutive_failures = 0
+                    run_context.record_event("auto_vision_on", f"{intent} / step {step_idx + 1}")
+                elif consecutive_failures >= 3:
                     logger.error("❌ 连续执行失败次数过多，自动终止当前意图的探索。")
                     run_context.record_event("intent_end", f"{intent} (aborted)", extra={"intent_tokens": intent_tokens, "agent_total_tokens": self.total_tokens})
                     return False

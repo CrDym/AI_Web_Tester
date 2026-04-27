@@ -31,6 +31,8 @@ function extractInteractiveElements(startId = 1) {
 
         if (typeof className === 'string') {
             const lowerClass = className.toLowerCase();
+            const testClass = (word) => new RegExp(`(^|[-_\\s])${word}([-_\\s]|$)`, 'i').test(className);
+            
             if (lowerClass.includes('select') || 
                 lowerClass.includes('input') ||
                 lowerClass.includes('search') ||
@@ -39,13 +41,16 @@ function extractInteractiveElements(startId = 1) {
                 lowerClass.includes('picker') ||
                 lowerClass.includes('combo') ||
                 lowerClass.includes('button') ||
-                lowerClass.includes('btn') ||
+                testClass('btn') ||
                 lowerClass.includes('cursor-pointer') ||
                 lowerClass.includes('cf-') ||
                 lowerClass.includes('ant-select-item') ||
                 lowerClass.includes('option') ||
-                lowerClass.includes('item') ||
-                lowerClass.includes('selection')) {
+                testClass('item') ||
+                lowerClass.includes('selection') ||
+                testClass('tab') ||
+                testClass('nav') ||
+                testClass('menu')) {
                 return true;
             }
             
@@ -72,9 +77,9 @@ function extractInteractiveElements(startId = 1) {
 
         // Return true if it's a content tag with actual text, so the LLM can assert
         // Relaxing the children.length === 0 constraint slightly to allow simple wrappers
-        if (contentTags.includes(el.tagName) && el.innerText && el.innerText.trim().length > 2) {
+        if (contentTags.includes(el.tagName) && el.innerText && el.innerText.trim().length > 1) {
             // If it has too many children, it's a layout container, not a leaf content node
-            if (el.children.length <= 1) return true;
+            if (el.children.length <= 2) return true;
         }
         
         return false;
@@ -132,8 +137,8 @@ function extractInteractiveElements(startId = 1) {
             }
         }
         
-        // 2. 使用 ID (如果是纯字母数字，避免复杂的随机 ID)
-        if (el.id && /^[a-zA-Z0-9_-]+$/.test(el.id)) return '#' + CSS.escape(el.id);
+        // 2. 使用 ID (如果是纯字母数字，避免复杂的随机 ID，如 el-popper-1234)
+        if (el.id && /^[a-zA-Z0-9_-]+$/.test(el.id) && !/\d{3,}/.test(el.id)) return '#' + CSS.escape(el.id);
         
         // 3. 使用特定的属性（如 name）
         if (el.getAttribute('name')) {
@@ -146,9 +151,9 @@ function extractInteractiveElements(startId = 1) {
             const text = el.innerText ? el.innerText.trim() : '';
             if (text.length > 0 && text.length < 20 && !text.includes('\n')) {
                 // 使用 text= 精确匹配而不是包含匹配，防止点到外层大容器
-                // 但是对于一些复杂框架的内部嵌套，text= 可能找不准。
-                // 保留旧版本的 text 匹配逻辑
-                return `text="${text}"`;
+                // 如果内部含有双引号，必须转义以防止生成的选择器出现语法错误
+                const safeText = text.replace(/"/g, '\\"');
+                return `text="${safeText}"`;
             }
         }
 
@@ -178,6 +183,15 @@ function extractInteractiveElements(startId = 1) {
         return path.join(' > ');
     }
 
+    // 预编译正则对象，提升整个提取周期的性能，同时避免在循环内重新声明
+    const containerRegexCache = {};
+    const testContainerClass = (word, pClass) => {
+        if (!containerRegexCache[word]) {
+            containerRegexCache[word] = new RegExp(`(^|[\\s_\\-])${word}([\\s_\\-]|$)`, 'i');
+        }
+        return containerRegexCache[word].test(pClass);
+    };
+    
     function traverse(node) {
         if (node.nodeType === Node.ELEMENT_NODE) {
             // 这里非常关键：不能因为节点不可见就直接 return 截断子节点遍历
@@ -197,24 +211,56 @@ function extractInteractiveElements(startId = 1) {
                 
                 const rect = node.getBoundingClientRect();
                 
-                elements.push({
-                    id: elementIdCounter,
-                    tag: node.tagName.toLowerCase(),
-                    role: node.getAttribute('role') || '',
-                    text: node.innerText ? node.innerText.trim().substring(0, 50) : '',
-                    placeholder: node.getAttribute('placeholder') || '',
-                    name: node.getAttribute('name') || '',
-                    id_attr: node.getAttribute('id') || '',
-                    type: node.getAttribute('type') || '',
-                    css_selector: getCssSelector(node),
-                    bbox: {
-                        // 只需要视口坐标，因为 screenshot(full_page=False) 截取的是当前视口
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height
+                // --- 尝试获取父级容器提示词 ---
+                let containerHint = '';
+                let parent = node.parentElement;
+                let depth = 0;
+                let isBtnLike = false;
+
+                while (parent && depth < 3) {
+                    const tag = parent.tagName.toLowerCase();
+                    const pClass = parent.getAttribute('class') || '';
+                    
+                    if (tag === 'form' || testContainerClass('form', pClass)) { containerHint = '在表单中'; break; }
+                    if (tag === 'header' || testContainerClass('header', pClass) || testContainerClass('nav', pClass)) { containerHint = '在导航栏'; break; }
+                    if (tag === 'footer' || testContainerClass('footer', pClass)) { containerHint = '在页脚'; break; }
+                    if (testContainerClass('modal', pClass) || testContainerClass('dialog', pClass) || testContainerClass('popup', pClass)) { containerHint = '在弹窗中'; break; }
+                    if (testContainerClass('table', pClass) || tag === 'tr' || tag === 'td') { containerHint = '在表格中'; break; }
+                    if (testContainerClass('list', pClass) || tag === 'ul' || tag === 'ol') { containerHint = '在列表中'; break; }
+                    
+                    if (testContainerClass('btn', pClass) || testContainerClass('button', pClass) || testContainerClass('cursor-pointer', pClass) || tag === 'a' || tag === 'button') {
+                        isBtnLike = true;
                     }
-                });
+                    parent = parent.parentElement;
+                    depth++;
+                }
+                
+                // 如果父级有强烈的按钮/链接暗示，补充给大模型
+                if (isBtnLike && !containerHint) {
+                    containerHint = '可点击';
+                }
+
+                elements.push({
+                        id: elementIdCounter,
+                        tag: node.tagName.toLowerCase(),
+                        role: node.getAttribute('role') || '',
+                        text: node.innerText ? node.innerText.trim().substring(0, 50) : '',
+                        placeholder: node.getAttribute('placeholder') || '',
+                        name: node.getAttribute('name') || '',
+                        id_attr: node.getAttribute('id') || '',
+                        type: node.getAttribute('type') || '',
+                        container_hint: containerHint, // 传给后端
+                        css_selector: getCssSelector(node),
+                        bbox: {
+                            // 只需要视口坐标，因为 screenshot(full_page=False) 截取的是当前视口
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        },
+                        // 增加一个重要性权重，优先保留视口中心、面积大的元素
+                        weight: (rect.width * rect.height) - (Math.abs(rect.x - window.innerWidth/2) + Math.abs(rect.y - window.innerHeight/2))
+                    });
                 elementIdCounter++;
                 extracted = true;
             }

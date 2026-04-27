@@ -8,8 +8,13 @@ import base64
 import re
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+import os
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from web_server.database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel
+
+worker_semaphore = asyncio.Semaphore(3) # 最大并发数为 3
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -67,26 +72,41 @@ def _case_path(case_id: str) -> str:
         case_id += ".json"
     return os.path.join(CASES_DIR, case_id)
 
+def _case_doc_from_model(c: CaseModel) -> Dict[str, Any]:
+    return {
+        "id": c.id,
+        "name": c.name,
+        "type": c.type,
+        "start_url": getattr(c, "start_url", None),
+        "steps": json.loads(c.steps) if c.steps else [],
+        "tags": json.loads(c.tags) if getattr(c, "tags", None) else [],
+        "created_at": getattr(c, "created_at", None),
+        "updated_at": getattr(c, "updated_at", None),
+    }
+
+def _write_case_backup_file(case_id: str, doc: Dict[str, Any]) -> Optional[str]:
+    try:
+        p = _case_path(case_id)
+        bak = p + ".bak"
+        with open(bak, "w", encoding="utf-8") as f:
+            json.dump(doc, f, ensure_ascii=False, indent=2)
+        return bak
+    except Exception:
+        return None
+
 def _list_cases() -> List[Dict[str, Any]]:
-    cases: List[Dict[str, Any]] = []
-    if os.path.exists(CASES_DIR):
-        for f in os.listdir(CASES_DIR):
-            if f.endswith(".json"):
-                p = os.path.join(CASES_DIR, f)
-                try:
-                    with open(p, "r", encoding="utf-8") as fp:
-                        doc = json.load(fp)
-                except Exception:
-                    continue
-                cases.append({
-                    "id": f, 
-                    "name": doc.get("name") or f, 
-                    "type": "json",
-                    "tags": doc.get("tags") or [],
-                    "updated_at": doc.get("updated_at") or doc.get("created_at") or 0
-                })
-    cases.sort(key=lambda x: x.get("updated_at") or 0, reverse=True)
-    return cases
+    db = SessionLocal()
+    try:
+        cases = db.query(CaseModel).order_by(CaseModel.updated_at.desc()).all()
+        return [{
+            "id": c.id,
+            "name": c.name,
+            "type": c.type,
+            "tags": json.loads(c.tags) if c.tags else [],
+            "updated_at": c.updated_at or c.created_at or 0
+        } for c in cases]
+    finally:
+        db.close()
 
 def _run_dir(run_id: str) -> str:
     run_id = (run_id or "").strip().replace("/", "_").replace("\\", "_").replace("..", "_")
@@ -109,27 +129,18 @@ def _suite_path(suite_id: str) -> str:
     return os.path.join(SUITES_DIR, suite_id)
 
 def _list_suites() -> List[Dict[str, Any]]:
-    suites: List[Dict[str, Any]] = []
-    if not os.path.exists(SUITES_DIR):
-        return suites
-    for f in os.listdir(SUITES_DIR):
-        if not f.endswith(".json"):
-            continue
-        p = os.path.join(SUITES_DIR, f)
-        try:
-            with open(p, "r", encoding="utf-8") as fp:
-                doc = json.load(fp)
-        except Exception:
-            continue
-        suites.append({
-            "id": f,
-            "name": doc.get("name") or f,
-            "env_id": doc.get("env_id"),
-            "case_count": len(doc.get("case_ids") or []),
-            "updated_at": doc.get("updated_at") or doc.get("created_at"),
-        })
-    suites.sort(key=lambda x: x.get("updated_at") or 0, reverse=True)
-    return suites
+    db = SessionLocal()
+    try:
+        suites = db.query(SuiteModel).order_by(SuiteModel.updated_at.desc()).all()
+        return [{
+            "id": s.id,
+            "name": s.name,
+            "env_id": s.env_id,
+            "case_count": len(json.loads(s.case_ids)) if s.case_ids else 0,
+            "updated_at": s.updated_at or s.created_at or 0
+        } for s in suites]
+    finally:
+        db.close()
 
 def _suite_run_dir(suite_run_id: str) -> str:
     suite_run_id = (suite_run_id or "").strip().replace("/", "_").replace("\\", "_").replace("..", "_")
@@ -280,6 +291,7 @@ def _make_ai_fix_suggestion(run_meta: Dict[str, Any], case_doc: Dict[str, Any], 
         "failed_step": step,
         "last_heal_event": heal_events[-1] if heal_events else None,
         "log_tail": logs[-60:],
+        "all_steps": case_doc.get("steps") or [],
     }
 
     system = (
@@ -538,19 +550,24 @@ async def generate_case(req: GenerateCaseReq):
         data = json.loads(content)
         
         # 构造用例结构
-        case_id = f"demo_case_{int(time.time() * 1000)}"
-        case_data = {
-            "id": case_id,
-            "name": req.name or "自然语言生成的用例",
-            "type": "recorded",
-            "start_url": req.start_url,
-            "steps": data.get("steps", []),
-            "llm_usage": {"token_usage": token_usage, "model": model_name},
-        }
+        case_id = f"demo_case_{int(time.time() * 1000)}.json"
         
-        case_path = os.path.join(CASES_DIR, f"{case_id}.json")
-        with open(case_path, 'w', encoding='utf-8') as f:
-            json.dump(case_data, f, ensure_ascii=False, indent=2)
+        db = SessionLocal()
+        try:
+            new_case = CaseModel(
+                id=case_id,
+                name=req.name or "自然语言生成的用例",
+                type="json",
+                start_url=req.start_url,
+                steps=json.dumps(data.get("steps", [])),
+                tags=json.dumps(["explore", "auto_generated"]),
+                created_at=int(time.time()),
+                updated_at=int(time.time())
+            )
+            db.add(new_case)
+            db.commit()
+        finally:
+            db.close()
             
         return {"status": "ok", "id": case_id, "token_usage": token_usage, "model": model_name}
     except Exception as e:
@@ -558,6 +575,15 @@ async def generate_case(req: GenerateCaseReq):
 
 @app.get("/api/cases")
 async def get_cases():
+    db = SessionLocal()
+    try:
+        db.query(CaseModel).filter(CaseModel.type == "recorded").update({"type": "json"})
+        db.query(CaseModel).filter(CaseModel.type == None).update({"type": "json"})
+        db.commit()
+    except Exception:
+        pass
+    finally:
+        db.close()
     return JSONResponse(_list_cases())
 
 @app.get("/api/suites")
@@ -569,10 +595,13 @@ async def create_suite(request: Request):
     data = await request.json()
     name = str(data.get("name") or "").strip() or f"suite_{int(time.time())}"
     suite_id = _safe_suite_id(data.get("id") or name)
+    if not suite_id.endswith(".json"):
+        suite_id += ".json"
+        
     env_id = data.get("env_id")
     setup_case_id = str(data.get("setup_case_id") or "").strip() or None
     raw_case_ids = data.get("case_ids") or []
-    case_ids: List[str] = []
+    case_ids = []
     seen = set()
     for cid in raw_case_ids:
         cid = str(cid or "").strip()
@@ -580,150 +609,237 @@ async def create_suite(request: Request):
             continue
         seen.add(cid)
         case_ids.append(cid)
-    doc = {
-        "id": f"{suite_id}.json" if not suite_id.endswith(".json") else suite_id,
-        "name": name,
-        "env_id": env_id,
-        "setup_case_id": setup_case_id,
-        "case_ids": case_ids,
-        "created_at": int(time.time()),
-        "updated_at": int(time.time()),
-    }
-    p = _suite_path(suite_id)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(doc, f, ensure_ascii=False, indent=2)
-    return JSONResponse({"status": "success", "id": os.path.basename(p)})
-
+        
+    db = SessionLocal()
+    try:
+        if db.query(SuiteModel).filter_by(id=suite_id).first():
+            return JSONResponse({"error": "Suite already exists"}, status_code=400)
+            
+        new_suite = SuiteModel(
+            id=suite_id,
+            name=name,
+            env_id=env_id,
+            setup_case_id=setup_case_id,
+            case_ids=json.dumps(case_ids),
+            created_at=int(time.time()),
+            updated_at=int(time.time())
+        )
+        db.add(new_suite)
+        db.commit()
+        return JSONResponse({"status": "success", "id": suite_id})
+    finally:
+        db.close()
 @app.get("/api/suites/{suite_id}")
 async def get_suite(suite_id: str):
-    p = _suite_path(suite_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Suite not found"}, status_code=404)
-    with open(p, "r", encoding="utf-8") as f:
-        return JSONResponse(json.load(f))
-
+    db = SessionLocal()
+    try:
+        s = db.query(SuiteModel).filter_by(id=suite_id).first()
+        if not s:
+            return JSONResponse({"error": "Suite not found"}, status_code=404)
+        return JSONResponse({
+            "id": s.id,
+            "name": s.name,
+            "description": s.description,
+            "env_id": s.env_id,
+            "setup_case_id": s.setup_case_id,
+            "case_ids": json.loads(s.case_ids) if s.case_ids else [],
+            "created_at": s.created_at,
+            "updated_at": s.updated_at
+        })
+    finally:
+        db.close()
 @app.put("/api/suites/{suite_id}")
 async def update_suite(suite_id: str, request: Request):
-    p = _suite_path(suite_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Suite not found"}, status_code=404)
     data = await request.json()
-    with open(p, "r", encoding="utf-8") as f:
-        doc = json.load(f)
-    name = str(data.get("name") or doc.get("name") or "").strip() or doc.get("name") or suite_id
-    env_id = data.get("env_id", doc.get("env_id"))
-    setup_case_id = str(data.get("setup_case_id", doc.get("setup_case_id") or "") or "").strip() or None
-    raw_case_ids = data.get("case_ids", doc.get("case_ids") or [])
-    case_ids: List[str] = []
-    seen = set()
-    for cid in raw_case_ids:
-        cid = str(cid or "").strip()
-        if not cid or cid == setup_case_id or cid in seen:
-            continue
-        seen.add(cid)
-        case_ids.append(cid)
-    doc["name"] = name
-    doc["env_id"] = env_id
-    doc["setup_case_id"] = setup_case_id
-    doc["case_ids"] = case_ids
-    doc["updated_at"] = int(time.time())
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(doc, f, ensure_ascii=False, indent=2)
-    return JSONResponse({"status": "success"})
-
+    db = SessionLocal()
+    try:
+        s = db.query(SuiteModel).filter_by(id=suite_id).first()
+        if not s:
+            return JSONResponse({"error": "Suite not found"}, status_code=404)
+            
+        if "name" in data: s.name = data.get("name")
+        if "description" in data: s.description = data.get("description")
+        if "env_id" in data: s.env_id = data.get("env_id")
+        if "setup_case_id" in data: s.setup_case_id = data.get("setup_case_id")
+        
+        raw_case_ids = data.get("case_ids") or []
+        case_ids = []
+        seen = set()
+        for cid in raw_case_ids:
+            cid = str(cid or "").strip()
+            if not cid or cid == s.setup_case_id or cid in seen:
+                continue
+            seen.add(cid)
+            case_ids.append(cid)
+            
+        if "case_ids" in data: s.case_ids = json.dumps(case_ids)
+        s.updated_at = int(time.time())
+        db.commit()
+        return JSONResponse({"status": "success", "message": "Suite updated"})
+    finally:
+        db.close()
 @app.delete("/api/suites/{suite_id}")
 async def delete_suite(suite_id: str):
-    p = _suite_path(suite_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Suite not found"}, status_code=404)
-    os.unlink(p)
+    db = SessionLocal()
+    try:
+        s = db.query(SuiteModel).filter_by(id=suite_id).first()
+        if not s:
+            return JSONResponse({"error": "Suite not found"}, status_code=404)
+        db.delete(s)
+        db.commit()
+    finally:
+        db.close()
+    
+    runs = _list_suite_runs(suite_id=suite_id)
+    import shutil
+    async with active_runs_lock:
+        for r in runs:
+            safe_id = (r["id"] or "").strip().replace("/", "_").replace("\\", "_").replace("..", "_")
+            d = _suite_run_dir(safe_id)
+            shutil.rmtree(d, ignore_errors=True)
+            if safe_id in active_runs:
+                del active_runs[safe_id]
+                
     return JSONResponse({"status": "success"})
-
 @app.post("/api/cases")
 async def create_case(request: Request):
     data = await request.json()
     name = _safe_case_name(data.get("name") or f"case_{int(time.time())}")
-    steps = data.get("steps") or []
-    start_url = data.get("start_url")
-    meta = data.get("meta") or {}
-    case: Dict[str, Any] = {
-        "id": f"{name}.json",
-        "name": name,
-        "created_at": int(time.time()),
-        "start_url": start_url,
-        "steps": steps,
-        "meta": meta,
-    }
-    p = _case_path(name)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(case, f, ensure_ascii=False, indent=2)
-    return JSONResponse({"status": "success", "id": os.path.basename(p)})
-
+    case_id = f"{name}.json"
+    
+    db = SessionLocal()
+    try:
+        if db.query(CaseModel).filter_by(id=case_id).first():
+            return JSONResponse({"error": "Case already exists"}, status_code=400)
+            
+        new_case = CaseModel(
+            id=case_id,
+            name=name,
+            type="json",
+            start_url=data.get("start_url"),
+            steps=json.dumps(data.get("steps", [])),
+            tags=json.dumps(data.get("tags", [])),
+            created_at=int(time.time()),
+            updated_at=int(time.time())
+        )
+        db.add(new_case)
+        db.commit()
+        return JSONResponse({"status": "success", "id": case_id})
+    finally:
+        db.close()
 @app.get("/api/cases/{case_id}")
 async def get_case(case_id: str):
-    p = _case_path(case_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Case not found"}, status_code=404)
-    with open(p, "r", encoding="utf-8") as f:
-        return JSONResponse(json.load(f))
-
+    db = SessionLocal()
+    try:
+        c = db.query(CaseModel).filter_by(id=case_id).first()
+        if not c:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
+        return JSONResponse({
+            "id": c.id,
+            "name": c.name,
+            "type": c.type,
+            "start_url": getattr(c, "start_url", None),
+            "steps": json.loads(c.steps) if c.steps else [],
+            "tags": json.loads(c.tags) if c.tags else [],
+            "created_at": c.created_at,
+            "updated_at": c.updated_at
+        })
+    finally:
+        db.close()
 @app.put("/api/cases/{case_id}")
 async def update_case(case_id: str, request: Request):
-    p = _case_path(case_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Case not found"}, status_code=404)
     data = await request.json()
-    with open(p, "r", encoding="utf-8") as f:
-        case = json.load(f)
-    case["start_url"] = data.get("start_url")
-    case["steps"] = data.get("steps") or []
-    if "tags" in data:
-        case["tags"] = data.get("tags")
-    case["updated_at"] = int(time.time())
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(case, f, ensure_ascii=False, indent=2)
-    return JSONResponse({"status": "success"})
-
+    db = SessionLocal()
+    try:
+        c = db.query(CaseModel).filter_by(id=case_id).first()
+        if not c:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
+        
+        _write_case_backup_file(case_id, _case_doc_from_model(c))
+        c.steps = json.dumps(data.get("steps", []))
+        if "tags" in data:
+            c.tags = json.dumps(data.get("tags", []))
+        if "name" in data:
+            c.name = data.get("name")
+        if "start_url" in data:
+            c.start_url = data.get("start_url")
+        c.updated_at = int(time.time())
+        db.commit()
+        return JSONResponse({"status": "success", "message": "Case updated"})
+    finally:
+        db.close()
 @app.post("/api/cases/{case_id}/rename")
 async def rename_case(case_id: str, request: Request):
-    old_path = _case_path(case_id)
-    if not os.path.exists(old_path):
-        return JSONResponse({"error": "Case not found"}, status_code=404)
-
     data = await request.json()
-    raw_name = data.get("name")
-    if not raw_name or not str(raw_name).strip():
-        return JSONResponse({"error": "Missing name"}, status_code=400)
-
-    safe_name = _safe_case_name(str(raw_name))
-    if safe_name.endswith(".json"):
-        safe_name = safe_name[:-5]
-    new_filename = f"{safe_name}.json"
-    new_path = os.path.join(CASES_DIR, new_filename)
-
-    if os.path.exists(new_path) and os.path.abspath(new_path) != os.path.abspath(old_path):
-        return JSONResponse({"error": "Target already exists"}, status_code=409)
-
-    with open(old_path, "r", encoding="utf-8") as f:
-        case = json.load(f)
-    case["id"] = new_filename
-    case["name"] = safe_name
-    case["updated_at"] = int(time.time())
-
-    if os.path.abspath(new_path) != os.path.abspath(old_path):
-        os.replace(old_path, new_path)
-
-    with open(new_path, "w", encoding="utf-8") as f:
-        json.dump(case, f, ensure_ascii=False, indent=2)
-
+    new_name = str(data.get("new_name") or "").strip()
+    if not new_name:
+        return JSONResponse({"error": "Name cannot be empty"}, status_code=400)
+    db = SessionLocal()
     try:
-        old_filename = os.path.basename(old_path)
-        _update_suites_case_ref(old_filename, new_filename)
+        c = db.query(CaseModel).filter_by(id=case_id).first()
+        if not c:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
+        _write_case_backup_file(case_id, _case_doc_from_model(c))
+        c.name = new_name
+        c.updated_at = int(time.time())
+        db.commit()
+        return JSONResponse({"status": "success"})
+    finally:
+        db.close()
+
+@app.post("/api/cases/{case_id}/restore")
+async def restore_case(case_id: str):
+    bak_path = _case_path(case_id) + ".bak"
+    if not os.path.exists(bak_path):
+        return JSONResponse({"error": "Backup not found"}, status_code=404)
+    try:
+        with open(bak_path, "r", encoding="utf-8") as f:
+            bak_doc = json.load(f)
     except Exception:
-        pass
+        return JSONResponse({"error": "Backup is invalid"}, status_code=400)
 
-    return JSONResponse({"status": "success", "case": {"id": new_filename, "name": new_filename, "type": "json"}})
+    db = SessionLocal()
+    try:
+        c = db.query(CaseModel).filter_by(id=case_id).first()
+        if not c:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
+        current_doc = _case_doc_from_model(c)
 
+        if not isinstance(bak_doc, dict):
+            return JSONResponse({"error": "Backup is invalid"}, status_code=400)
+
+        steps_val = bak_doc.get("steps", [])
+        if isinstance(steps_val, str):
+            try:
+                steps_val = json.loads(steps_val)
+            except Exception:
+                steps_val = []
+        if not isinstance(steps_val, list):
+            steps_val = []
+
+        _write_case_backup_file(case_id, current_doc)
+        c.steps = json.dumps(steps_val)
+        if "start_url" in bak_doc:
+            c.start_url = bak_doc.get("start_url")
+        if "name" in bak_doc and bak_doc.get("name"):
+            c.name = bak_doc.get("name")
+        if "tags" in bak_doc:
+            tags_val = bak_doc.get("tags") or []
+            if isinstance(tags_val, str):
+                try:
+                    tags_val = json.loads(tags_val)
+                except Exception:
+                    tags_val = []
+            if isinstance(tags_val, list):
+                c.tags = json.dumps(tags_val)
+        if "type" in bak_doc and bak_doc.get("type"):
+            c.type = bak_doc.get("type")
+
+        c.updated_at = int(time.time())
+        db.commit()
+        return JSONResponse({"status": "success", "message": "已恢复到上一个用例版本（并已将当前版本写入备份）"})
+    finally:
+        db.close()
 @app.post("/api/cases/{case_id}/heal/approve")
 async def approve_heal(case_id: str, request: Request):
     data = await request.json()
@@ -733,61 +849,78 @@ async def approve_heal(case_id: str, request: Request):
     if not new_selector:
         return JSONResponse({"error": "Missing parameters"}, status_code=400)
         
-    p = _case_path(case_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Case not found"}, status_code=404)
-        
-    with open(p, "r", encoding="utf-8") as f:
-        case = json.load(f)
-
-    already_updated = any((step.get("selector") or "") == new_selector for step in case.get("steps", []))
-    updated = False
-    steps = case.get("steps", []) or []
-    if old_selector:
-        for step in steps:
-            step_sel = step.get("selector")
-            if step_sel == old_selector or (step_sel or "").replace('"', "'") == old_selector:
-                step["selector"] = new_selector
-                updated = True
-    else:
-        if not step_intent:
-            return JSONResponse({"error": "Missing parameters"}, status_code=400)
-        candidates: List[int] = []
-        for i, step in enumerate(steps):
-            if (step.get("intent") or "").strip() == step_intent and not (step.get("selector") or "").strip():
-                candidates.append(i)
-        if len(candidates) == 0:
-            return JSONResponse({"error": "No matching step found for intent (selector empty required)"}, status_code=404)
-        if len(candidates) > 1:
-            return JSONResponse({"error": "Multiple matching steps found for intent", "indices": candidates}, status_code=409)
-        steps[candidates[0]]["selector"] = new_selector
-        updated = True
+    db = SessionLocal()
+    try:
+        case_model = db.query(CaseModel).filter_by(id=case_id).first()
+        if not case_model:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
             
-    if updated:
-        case["updated_at"] = int(time.time())
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(case, f, ensure_ascii=False, indent=2)
-        return JSONResponse({"status": "success", "message": "Selector updated"})
-    if already_updated:
-        return JSONResponse({"status": "success", "message": "Selector already updated"})
-    return JSONResponse({"error": f"Selector '{old_selector}' not found in current case steps"}, status_code=404)
+        _write_case_backup_file(case_id, _case_doc_from_model(case_model))
+        steps = json.loads(case_model.steps) if case_model.steps else []
+        already_updated = any((step.get("selector") or "") == new_selector for step in steps)
+        updated = False
+        
+        if old_selector:
+            for step in steps:
+                step_sel = step.get("selector")
+                if step_sel == old_selector or (step_sel or "").replace('"', "'") == old_selector:
+                    step["selector"] = new_selector
+                    updated = True
+        else:
+            if not step_intent:
+                return JSONResponse({"error": "Missing parameters"}, status_code=400)
+            candidates: List[int] = []
+            for i, step in enumerate(steps):
+                if (step.get("intent") or "").strip() == step_intent and not (step.get("selector") or "").strip():
+                    candidates.append(i)
+            if len(candidates) == 0:
+                return JSONResponse({"error": "No matching step found for intent (selector empty required)"}, status_code=404)
+            if len(candidates) > 1:
+                return JSONResponse({"error": "Multiple matching steps found for intent", "indices": candidates}, status_code=409)
+            steps[candidates[0]]["selector"] = new_selector
+            updated = True
+                
+        if updated:
+            case_model.steps = json.dumps(steps)
+            case_model.updated_at = int(time.time())
+            db.commit()
+            return JSONResponse({"status": "success", "message": "Selector updated"})
+        if already_updated:
+            return JSONResponse({"status": "success", "message": "Selector already updated"})
+        return JSONResponse({"error": f"Selector '{old_selector}' not found in current case steps"}, status_code=404)
+    finally:
+        db.close()
 
 @app.delete("/api/cases/{case_id}")
 async def delete_case(case_id: str):
-    p = _case_path(case_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Case not found"}, status_code=404)
-    os.unlink(p)
-    return JSONResponse({"status": "success"})
+    db = SessionLocal()
+    try:
+        case_model = db.query(CaseModel).filter_by(id=case_id).first()
+        if not case_model:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
+        db.delete(case_model)
+        db.commit()
+        return JSONResponse({"status": "success"})
+    finally:
+        db.close()
 
 @app.get("/api/cases/{case_id}/script")
 async def get_case_script(case_id: str):
-    p = _case_path(case_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Case not found"}, status_code=404)
-    with open(p, "r", encoding="utf-8") as f:
-        case = json.load(f)
-    return JSONResponse({"content": _build_python_script(case)})
+    db = SessionLocal()
+    try:
+        case_model = db.query(CaseModel).filter_by(id=case_id).first()
+        if not case_model:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
+        case = {
+            "id": case_model.id,
+            "name": case_model.name,
+            "start_url": case_model.start_url,
+            "steps": json.loads(case_model.steps) if case_model.steps else [],
+            "type": case_model.type
+        }
+        return JSONResponse({"content": _build_python_script(case)})
+    finally:
+        db.close()
 
 @app.get("/api/runs")
 async def get_runs(case_id: Optional[str] = None):
@@ -814,11 +947,22 @@ async def ai_fix_suggest(run_id: str, req: RunFixSuggestReq):
     case_id = run_meta.get("case_id")
     if not case_id:
         return JSONResponse({"error": "Missing case_id"}, status_code=400)
-    case_path = _case_path(case_id)
-    if not os.path.exists(case_path):
-        return JSONResponse({"error": "Case not found"}, status_code=404)
-    with open(case_path, "r", encoding="utf-8") as f:
-        case_doc = json.load(f)
+    
+    db = SessionLocal()
+    try:
+        case_model = db.query(CaseModel).filter_by(id=case_id).first()
+        if not case_model:
+            return JSONResponse({"error": "Case not found"}, status_code=404)
+        case_doc = {
+            "id": case_model.id,
+            "name": case_model.name,
+            "start_url": case_model.start_url,
+            "steps": json.loads(case_model.steps) if case_model.steps else [],
+            "type": case_model.type
+        }
+    finally:
+        db.close()
+        
     suggestion = _make_ai_fix_suggestion(run_meta, case_doc, force=bool(req.force))
     run_meta["ai_fix_suggestion"] = suggestion
     try:
@@ -1101,7 +1245,21 @@ async def run_script(name: str, env_id: Optional[str] = None):
     return JSONResponse({"status": "starting", "session_id": result["session_id"], "run_id": result["run_id"]})
 
 async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    json_path = _case_path(name)
+    db = SessionLocal()
+    case = None
+    try:
+        case_model = db.query(CaseModel).filter_by(id=name).first()
+        if case_model:
+            case = {
+                "id": case_model.id,
+                "name": case_model.name,
+                "start_url": case_model.start_url,
+                "steps": json.loads(case_model.steps) if case_model.steps else [],
+                "type": case_model.type
+            }
+    finally:
+        db.close()
+
     file_path = os.path.join(SCRIPTS_DIR, name)
     resolved_script_path: Optional[str] = None
     temp_file: Optional[tempfile.NamedTemporaryFile] = None
@@ -1116,11 +1274,8 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
                     base_url_override = e.get("base_url")
                     break
 
-    if os.path.exists(json_path):
-        case_id = os.path.basename(json_path)
-        with open(json_path, "r", encoding="utf-8") as f:
-            case = json.load(f)
-            
+    if case:
+        case_id = case["id"]
         if base_url_override and case.get("start_url"):
             su = case["start_url"]
             if su.startswith("/"):
@@ -1177,7 +1332,11 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
                 break
             await asyncio.sleep(0.1)
     ws = active_sessions.get(session_id)
-    _load_env()
+    if ws:
+        await ws.send_json({"type": "log", "message": "⏳ 等待队列资源中..."})
+        
+    async with worker_semaphore:
+        _load_env()
     
     # 设置环境变量，让底层的 agent.py 和 driver.py 知道要往哪个 WS 发送截图和日志
     # 为了 MVP 演示，我们直接劫持 stdout，并通过截屏插件推送
@@ -1381,6 +1540,37 @@ async def save_environments(request: Request):
         json.dump(data, f, ensure_ascii=False, indent=2)
     return JSONResponse({"status": "success"})
 
+PROMPTS_DIR = os.path.join(PROJECT_ROOT, "src", "ai_tester", "prompts")
+
+@app.get("/api/prompts")
+async def get_prompts():
+    os.makedirs(PROMPTS_DIR, exist_ok=True)
+    prompts = {}
+    for f in os.listdir(PROMPTS_DIR):
+        if f.endswith(".txt"):
+            try:
+                with open(os.path.join(PROMPTS_DIR, f), "r", encoding="utf-8") as file:
+                    prompts[f] = file.read()
+            except Exception:
+                pass
+    return JSONResponse(prompts)
+
+class PromptUpdateReq(BaseModel):
+    content: str
+
+@app.put("/api/prompts/{filename}")
+async def update_prompt(filename: str, req: PromptUpdateReq):
+    if not filename.endswith(".txt"):
+        return JSONResponse({"error": "Invalid filename"}, status_code=400)
+    os.makedirs(PROMPTS_DIR, exist_ok=True)
+    filepath = os.path.join(PROMPTS_DIR, filename)
+    try:
+        with open(filepath, "w", encoding="utf-8") as file:
+            file.write(req.content)
+        return JSONResponse({"status": "success"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.get("/api/config")
 async def get_config():
     p = os.path.join(PROJECT_ROOT, ".env")
@@ -1479,3 +1669,9 @@ async def test_config(request: Request):
         return JSONResponse({"status": "success", "message": msg, "latency_ms": latency_ms, "token_usage": token_usage, "model": model_name})
     except Exception as e:
         return JSONResponse({"error": f"连接失败: {str(e)}"}, status_code=400)
+
+
+# Serve frontend static files
+frontend_dist = os.path.join(PROJECT_ROOT, "frontend", "dist")
+if os.path.exists(frontend_dist):
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

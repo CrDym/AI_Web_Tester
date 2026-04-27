@@ -34,6 +34,7 @@
 - 🚑 **AI 智能自愈引擎 (Self-Healing)**：这是框架的杀手锏。当原本录制的 CSS 选择器因为页面重构失效时，底层会自动拦截异常，并截取当前页面 DOM 与画面发送给大模型。AI 会根据你的“意图描述”重新寻找元素，并继续执行测试。**测试不再中断！**
 - 🛡️ **自愈选择器评分与审核回写**：AI 自愈时会为候选选择器进行稳定性打分（优先采用 `data-testid` / `role` / `aria` 等）。高分选择器可写入本地缓存；在 Web 端可进入 **自愈审计大盘**，对比“自愈前/后”截图并一键 **批准更新** 将 selector 写回用例（支持原 selector 为空时按意图定位步骤）。
 - 🔎 **Token 成本可视化**：所有大模型调用统一统计 Token 消耗；在运行记录/套件汇总/自愈事件/修复建议/NL2Case 等入口展示明细与总计。
+- 🧭 **探索模式（新页面跑通 → 生成用例）**：针对全新页面/全新流程，AI 先基于“可交互元素清单”探索跑通并生成 steps（含 selector 与 intent），后续用例进入稳定回归链路。
 - 🧰 **失败用例修复建议**：失败后可生成 AI 修复建议（根因解释 + 可执行的 patched_steps），并支持一键应用到用例。
 - 📦 **测试套件与执行计划 (Test Suites)**：支持将用例组装为 Suite 批量运行。可指定全局的“前置登录用例”（通过注入 Browser Context 共享状态），一次登录，全套件复用。
 - 📺 **实时监控与运行历史**：套件执行时，控制台右侧会**实时播放测试画面**和执行日志。每次运行的截帧、步骤耗时、Token 与日志均会落盘，方便随时回放审计。
@@ -54,14 +55,16 @@ ai-web-tester/
 │   ├── driver.py               # Playwright 动作封装
 │   └── inject/                 # JS 注入脚本：DOM 降维压缩提权
 ├── web_server/                 # 🚀 Web 后端 (FastAPI)
-│   └── app.py                  # API、WebSocket 日志/截图实时推送、子进程调度
+│   ├── app.py                  # API、WebSocket 日志/截图实时推送、子进程调度
+│   └── database.py             # SQLite 数据库模型定义
 ├── frontend/                   # 💻 Web 前端控制台 (React + Tailwind)
-│   └── src/App.tsx             # 核心视图：用例大厅、运行回放、自愈审核
+│   └── src/App.tsx             # 核心视图：SOLO TEST 极客控制台、运行回放、自愈审核
 ├── extension/                  # 🧩 Chrome 录制插件
 ├── tests/                      # 数据落盘目录 (自动生成)
-│   ├── recorded_cases/         # 用例 JSON 库
-│   ├── run_history/            # 单用例运行产物 (日志、截图、元数据、token_usage)（默认不入库）
-│   └── suite_history/          # 套件运行产物（默认不入库）
+│   ├── tester.db               # SQLite 数据库，持久化存储 Cases, Runs, Suites
+│   ├── recorded_cases/         # 用例 JSON 备份库 (.bak 文件)
+│   ├── run_history/            # 单用例运行产物 (日志、截图、元数据、token_usage)
+│   └── suite_history/          # 套件运行产物
 └── ROADMAP.md                  # 开发演进路线
 ```
 
@@ -69,11 +72,12 @@ ai-web-tester/
 
 ## 🧠 核心概念
 
-- **用例（Case）**：一个 JSON 文件，描述起始 URL + steps（动作序列）。文件默认落盘到 `tests/recorded_cases/`。
+- **用例（Case）**：包含起始 URL + steps（动作序列）。持久化存储在 `tests/tester.db`，并支持 **.bak 备份一键恢复**。
 - **步骤（Step）**：单个动作（click/input/assert...），推荐以 `intent` 描述“你想做什么”，`selector` 可为空。
-- **运行（Run）**：一次用例执行的结果与产物，默认落盘到 `tests/run_history/<run_id>/`，支持回放与审计。
+- **运行（Run）**：一次用例执行的结果与产物，支持回放与审计。
 - **自愈（Heal）**：当 selector 失效/缺失时，引擎用 DOM（可选截图）+ intent 调用大模型寻找候选定位并继续执行。
-- **审计与回写（Approve）**：自愈结果不会自动写入用例；在 Web 控制台里对比自愈前/后截图后，一键“批准更新”写回 steps.selector（避免把不稳定 selector 误写入）。
+- **审计与回写（Approve）**：自愈结果不会自动写入用例；在 Web 控制台里对比自愈前/后截图后，一键“批准更新”写回 DB。
+- **探索（Explore）**：用于全新页面的“先跑通再固化”。探索阶段以编号元素清单为输入，显著减少大模型上下文；跑通后生成可回归用例。
 - **套件（Suite）**：多个用例按顺序组成的执行计划，可选前置用例（setup_case）用于登录等准备动作。
 - **Token 统计**：所有大模型调用统一记录 token_usage，在运行记录、套件汇总、自愈事件、修复建议等处展示，便于成本核算。
 
@@ -206,9 +210,11 @@ npm run dev
 ### 用例大厅
 
 - **用例列表**：按名称/ID 搜索、按标签筛选与管理（标签用于组织业务用例）
+- **探索列表**：展示探索模式的运行记录（running/completed/failed），便于随时回看探索过程与截图
 - **用例创建**：
   - 新建空白用例（手工编排 steps）
   - NL2Case：输入自然语言指令生成 steps（selector 初始可为空）
+  - 探索模式：输入目标（Goal）与成功标志（可选），AI 自动探索跑通并生成可回归用例
 - **运行历史**：展示该用例的单次运行记录，包含状态、耗时、Token；点击可进入回放
 
 ### 用例编辑器
@@ -263,6 +269,7 @@ npm run dev
 | 用例 | DELETE | `/api/cases/{case_id}` | 删除用例 |
 | 用例 | POST | `/api/cases/{case_id}/rename` | 重命名用例 |
 | 用例 | POST | `/api/cases/generate` | NL2Case：自然语言生成 steps（返回 token_usage） |
+| 探索 | POST | `/api/explore` | 探索模式：跑通新页面流程并自动生成用例（完成后可在 run 详情中拿到 generated_case_id） |
 | 自愈 | POST | `/api/cases/{case_id}/heal/approve` | 审计通过后写回 selector（支持 old_selector 为空时按 intent 定位步骤） |
 | 脚本 | GET | `/api/cases/{case_id}/script` | 查看动态生成的 pytest 脚本 |
 | 运行 | POST | `/api/run/{case_id}` | 启动单用例运行（返回 run_id/session_id） |
