@@ -89,12 +89,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     name: defaultFileName,
                     start_url: startUrl,
-                    steps: actions
+                    steps: actions,
+                    type: "json"
                 })
             });
             
             if (response.ok) {
-                alert("✅ 用例已成功发送到本地管理控制台！请在浏览器中打开 http://127.0.0.1:5173 查看。");
+                alert("✅ 用例已成功发送到本地管理控制台！请在浏览器中打开 http://127.0.0.1:8000 查看。");
             } else {
                 throw new Error("Server responded with error");
             }
