@@ -155,6 +155,7 @@ interface CaseDoc {
   start_url?: string | null;
   steps: CaseStep[];
   tags?: string[];
+  dataset?: any[];
 }
 
 interface EnvConfig {
@@ -162,6 +163,92 @@ interface EnvConfig {
   name: string;
   base_url: string;
 }
+
+const DatasetEditor = ({ caseDoc, setCaseDoc }: { caseDoc: CaseDoc; setCaseDoc: (c: CaseDoc) => void }) => {
+  const [text, setText] = useState(() => JSON.stringify(caseDoc.dataset || [], null, 2));
+  const [error, setError] = useState<string | null>(null);
+
+  const handleBlur = () => {
+    try {
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) {
+        setError('数据集必须是一个 JSON 数组（List）');
+        return;
+      }
+      setError(null);
+      setCaseDoc({ ...caseDoc, dataset: parsed });
+      setText(JSON.stringify(parsed, null, 2));
+    } catch (e: any) {
+      setError('无效的 JSON 格式: ' + e.message);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string;
+      try {
+        let parsed: any[] = [];
+        if (file.name.endsWith('.csv')) {
+          const lines = content.split('\n').filter(line => line.trim() !== '');
+          if (lines.length < 2) {
+            setError('CSV 格式无效或无数据');
+            return;
+          }
+          const headers = lines[0].split(',').map(h => h.trim());
+          for (let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(',').map(v => v.trim());
+            const obj: any = {};
+            headers.forEach((h, idx) => {
+              obj[h] = values[idx] || '';
+            });
+            parsed.push(obj);
+          }
+        } else {
+          parsed = JSON.parse(content);
+          if (!Array.isArray(parsed)) {
+            setError('上传的 JSON 必须是一个数组');
+            return;
+          }
+        }
+        setError(null);
+        setCaseDoc({ ...caseDoc, dataset: parsed });
+        setText(JSON.stringify(parsed, null, 2));
+      } catch (err: any) {
+        setError('解析文件失败: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="space-y-4 h-full flex flex-col">
+      <div className="flex items-start justify-between">
+        <div className="flex flex-col gap-1">
+          <span className="text-[13px] font-bold tracking-widest text-[#f4f4f5] uppercase">绑定数据集 (JSON Array)</span>
+          <span className="text-[11px] text-zinc-500 max-w-xl leading-relaxed">
+            运行时会自动使用 <code className="text-[#00e5ff] px-1 bg-[#00e5ff]/10 rounded">{'${变量名}'}</code> 替换用例中的内容。如果数组为空或未配置，则仅运行一次。
+          </span>
+        </div>
+        <label className="shrink-0 cursor-pointer bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20 text-[#00e5ff] border border-[#00e5ff]/30 px-4 py-2 rounded text-[11px] font-bold tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(0,229,255,0.05)] hover:shadow-[0_0_15px_rgba(0,229,255,0.2)]">
+          导入 JSON / CSV 文件
+          <input type="file" accept=".json,.csv" className="hidden" onChange={handleFileChange} />
+        </label>
+      </div>
+      {error && <div className="text-xs text-rose-500">{error}</div>}
+      <textarea
+        className="flex-1 w-full bg-[#0a0e17]/80 backdrop-blur-xl border border-[#00e5ff]/20 rounded-xl p-4 text-[13px] text-[#00e5ff] font-mono focus:outline-none focus:border-[#00e5ff]/50 focus:shadow-[0_0_20px_rgba(0,229,255,0.1)] transition-all custom-scrollbar leading-relaxed"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={handleBlur}
+        placeholder={`[\n  {\n    "username": "admin",\n    "password": "123"\n  }\n]`}
+      />
+    </div>
+  );
+};
 
 function App() {
   const [cases, setCases] = useState<TestCase[]>([]);
@@ -187,7 +274,7 @@ function App() {
   const suiteWsRef = useRef<{ ws: WebSocket, runId: string } | null>(null);
   
   const [saving, setSaving] = useState(false);
-  const [leftTab, setLeftTab] = useState<'editor' | 'python'>('editor');
+  const [leftTab, setLeftTab] = useState<'editor' | 'dataset' | 'python'>('editor');
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [lastSaved, setLastSaved] = useState<string>('');
@@ -948,6 +1035,7 @@ function App() {
       await axios.put(`/api/cases/${selectedCase.id}`, {
         start_url: caseDoc.start_url,
         steps: caseDoc.steps,
+        dataset: caseDoc.dataset,
       });
       const refreshed = await axios.get(`/api/cases/${selectedCase.id}`);
       setCaseDoc(refreshed.data);
@@ -1983,7 +2071,7 @@ function App() {
                     <div className="px-4 py-2 bg-[#0a0e17]/80 backdrop-blur-xl text-xs font-semibold text-zinc-400 flex items-center justify-between border-b border-[#1f2937]">
                       <div className="flex items-center gap-2">
                         <FileJson className="w-3.5 h-3.5" />
-                        {leftTab === 'editor' ? '用例编辑器' : '生成脚本 (Python)'}
+                        {leftTab === 'editor' ? '用例编辑器' : leftTab === 'dataset' ? '数据集' : '生成脚本 (Python)'}
                       </div>
                       <div className="flex items-center gap-2">
                         <button
@@ -1991,6 +2079,12 @@ function App() {
                           className={`px-2 py-1 rounded-xl border text-xs ${leftTab === 'editor' ? 'bg-zinc-800 border-[#1f2937] text-zinc-200' : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-300'}`}
                         >
                           编辑
+                        </button>
+                        <button
+                          onClick={() => setLeftTab('dataset')}
+                          className={`px-2 py-1 rounded-xl border text-xs ${leftTab === 'dataset' ? 'bg-zinc-800 border-[#1f2937] text-zinc-200' : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-300'}`}
+                        >
+                          数据集
                         </button>
                         <button
                           onClick={() => setLeftTab('python')}
@@ -2258,6 +2352,12 @@ function App() {
                         >
                           {scriptContent}
                         </SyntaxHighlighter>
+                      ) : leftTab === 'dataset' ? (
+                        !caseDoc ? (
+                          <div className="text-zinc-600 italic">加载中...</div>
+                        ) : (
+                          <DatasetEditor key={caseDoc.id} caseDoc={caseDoc} setCaseDoc={setCaseDoc} />
+                        )
                       ) : (
                         !caseDoc ? (
                           <div className="text-zinc-600 italic">加载中...</div>
