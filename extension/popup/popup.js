@@ -10,13 +10,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateUI() {
         chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
             if (res && res.isRecording) {
-                statusText.textContent = "RECORDING...";
+                statusText.textContent = "录制中...";
                 statusText.className = "recording";
                 statusDot.className = "dot recording";
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
             } else {
-                statusText.textContent = "SYSTEM STANDBY";
+                statusText.textContent = "系统就绪";
                 statusText.className = "";
                 statusDot.className = "dot";
                 startBtn.disabled = false;
