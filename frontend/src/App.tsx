@@ -244,7 +244,7 @@ const DatasetEditor = ({ caseDoc, setCaseDoc }: { caseDoc: CaseDoc; setCaseDoc: 
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={handleBlur}
-        placeholder={`[\n  {\n    "username": "admin",\n    "password": "123"\n  }\n]`}
+        placeholder={`[\n  {\n    "username": "admin",\n    "password": "123"\n  },\n  {\n    "username": "guest",\n    "password": "456"\n  }\n]\n\n// 提示：如果你导入 CSV 文件，它会自动转化为上述的 JSON Array 格式。\n// 第一行（表头）会作为变量名（例如 username）。`}
       />
     </div>
   );
