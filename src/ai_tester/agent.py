@@ -96,7 +96,7 @@ class AITesterAgent:
     def _rewrite_code_file(self, intent: str, action_sequence: list) -> None:
         """
         自动代码回写机制：在成功执行意图后，找到调用该意图的测试文件，
-        将原生 Playwright 代码自动注入到文件中，从而在代码层面固化 AI 的探索成果。
+        将原生 Playwright 代码自动注入到文件中，从而在代码层面固化 AI 的自动执行成果。
         """
         import inspect
         import traceback
@@ -213,7 +213,7 @@ class AITesterAgent:
                 os.remove(temp_path)
                 raise write_err
                 
-            logger.info(f"✨ 成功将 AI 探索成果自动回写至代码: {os.path.basename(file_path)}")
+            logger.info(f"✨ 成功将 AI 自动执行成果回写至代码: {os.path.basename(file_path)}")
             
         except Exception as e:
             logger.warning(f"⚠️ 代码回写失败: {e}")
@@ -231,7 +231,7 @@ class AITesterAgent:
 
     def step(self, intent: str, max_steps: int = 10) -> bool:
         """
-        基于自然语言意图，自主探索并执行多步操作，直到完成或超出步数。
+        基于自然语言意图，自主推导并执行多步操作，直到完成或超出步数。
         支持稳定脚本缓存回放，跳过大模型。
         """
         logger.info(f"🎯 开始执行意图: '{intent}'")
@@ -272,7 +272,7 @@ class AITesterAgent:
                             self.driver.perform_action(action, f"SELECTOR:{safe_selector}", value)
                         self.driver.page.wait_for_timeout(1000)
                     except Exception as e:
-                        logger.warning(f"   ⚠️ 重放动作失败: {e}，将回退到大模型自主探索模式。")
+                        logger.warning(f"   ⚠️ 重放动作失败: {e}，将回退到大模型自主推导模式。")
                         replay_success = False
                         break
                 
@@ -494,7 +494,7 @@ class AITesterAgent:
                 elif len(recent_loop_keys) == 3 and recent_loop_keys[0] == recent_loop_keys[2] and recent_loop_keys[1] == loop_detect_key:
                     consecutive_failures += 1.5
                     logger.warning(f"⚠️ 检测到大模型陷入交替动作死循环 (A->B->A->B)")
-                    action_record += " (⚠️ 警告: 动作在两个元素间来回交替未见进展，请更换探索策略！)"
+                    action_record += " (⚠️ 警告: 动作在两个元素间来回交替未见进展，请更换策略！)"
                     run_context.record_event("dead_loop", action_record)
                 else:
                     # 动作看起来是新的，清空失败计数，避免历史累积导致误判
@@ -510,7 +510,7 @@ class AITesterAgent:
                     self.driver.page.wait_for_timeout(1000)
                 
                 if consecutive_failures >= 3:
-                    logger.error("❌ 连续失败/死循环次数过多，自动终止当前意图的探索。")
+                    logger.error("❌ 连续失败/死循环次数过多，自动终止当前意图的推导执行。")
                     run_context.record_event("intent_end", f"{intent} (aborted)", extra={"intent_tokens": intent_tokens, "agent_total_tokens": self.total_tokens})
                     return False
             except Exception as e:
@@ -532,7 +532,7 @@ class AITesterAgent:
                     consecutive_failures = 0
                     run_context.record_event("auto_vision_on", f"{intent} / step {step_idx + 1}")
                 elif consecutive_failures >= 3:
-                    logger.error("❌ 连续执行失败次数过多，自动终止当前意图的探索。")
+                    logger.error("❌ 连续执行失败次数过多，自动终止当前意图的推导执行。")
                     run_context.record_event("intent_end", f"{intent} (aborted)", extra={"intent_tokens": intent_tokens, "agent_total_tokens": self.total_tokens})
                     return False
                 # 在真实框架中，这里可以触发“自愈（Self-Healing）”机制或抛出异常

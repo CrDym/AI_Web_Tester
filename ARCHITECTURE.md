@@ -22,7 +22,8 @@
 │   ├── manifest.json     # 插件清单
 │   └── src/              # 注入脚本，用于捕获用户的点击、输入并生成测试 JSON
 ├── tests/                # 用户数据目录 (持久化存储)
-│   ├── recorded_cases/   # 存放录制或 NL2Case 生成的测试用例 (JSON 格式)
+│   ├── tester.db         # SQLite 数据库：持久化存储 Cases / Runs / Suites
+│   ├── recorded_cases/   # 用例备份目录（.bak）
 │   ├── recorded_scripts/ # 运行时动态生成的 Python (Playwright) 脚本（默认不入库）
 │   └── run_history/      # 每次测试执行的运行记录、日志和截图存档（默认不入库）
 │   ├── suites/           # 套件（测试计划模板）：由多个 case_id 组成的有序集合
@@ -34,7 +35,7 @@
 ## 核心组件交互链路
 
 1. **用例创建 (两种方式)**
-   - **手工录制**: 通过 `extension/` Chrome 插件，在页面上点击操作，插件会生成标准化 JSON 格式的测试步骤，保存到 `tests/recorded_cases/`。
+   - **手工录制**: 通过 `extension/` Chrome 插件，在页面上点击操作，插件会生成标准化 JSON 格式的测试步骤，并通过后端写入 SQLite（`tests/tester.db`）；同时会生成 `.bak` 备份到 `tests/recorded_cases/`。
    - **自然语言 (NL2Case)**: 在 `frontend/` 输入自然语言步骤，`web_server/` 调用 LLM 转换为标准化 JSON 步骤，但此时 `selector` 为空。
 
 2. **用例执行与动态编译**
@@ -56,10 +57,6 @@
 
 5. **Token 统计**
    - 所有大模型调用会记录 Token 使用情况，并在单次运行记录与套件汇总中展示总计与明细，便于成本核算与优化。
-
-6. **探索模式 (Explore)**
-   - 用于全新页面/全新流程的“先跑通再固化”：后端启动探索 run，脚本调用 `src/ai_tester/agent.py` 基于“可交互元素清单快照”迭代决策动作。
-   - 探索过程中会持续推送日志与截图；探索完成后落盘 `explore_actions.json` 并生成可回归的用例 JSON（含 selector 与 intent），进入正常回归链路。
 
 ## 技术栈
 - **Frontend**: React 18, Vite, TailwindCSS, Lucide React, react-syntax-highlighter

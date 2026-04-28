@@ -21,7 +21,6 @@ interface RunSummary {
   ended_at?: number | null;
   duration_ms?: number | null;
   token_usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-  explore?: any;
 }
 
 interface HealEvent {
@@ -62,7 +61,6 @@ interface RunDetail {
   ai_fix_suggestion?: AIFixSuggestion;
   token_usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   token_summary?: any;
-  explore?: any;
 }
 
 interface SuiteSummary {
@@ -282,7 +280,6 @@ function App() {
   const [runsLoading, setRunsLoading] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null);
-  const [exploreRuns, setExploreRuns] = useState<RunSummary[]>([]);
   const [pendingRunToOpen, setPendingRunToOpen] = useState<{ case_id: string; run_id: string } | null>(null);
   const [selectedShotFile, setSelectedShotFile] = useState<string | null>(null);
   const [shotCache, setShotCache] = useState<Record<string, string>>({});
@@ -293,7 +290,6 @@ function App() {
   
   const [showSettings, setShowSettings] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [showExploreModal, setShowExploreModal] = useState(false);
   const [showCreateSuiteModal, setShowCreateSuiteModal] = useState(false);
   const [createSuiteName, setCreateSuiteName] = useState('');
   const [createSuiteEnvId, setCreateSuiteEnvId] = useState<string>('');
@@ -304,9 +300,7 @@ function App() {
   const promptResolverRef = useRef<((val: string | null) => void) | null>(null);
   const [promptValue, setPromptValue] = useState('');
   const [generateForm, setGenerateForm] = useState({ name: '', start_url: '', instruction: '' });
-  const [exploreForm, setExploreForm] = useState({ name: '', start_url: '', goal: '', done_hint: '', max_steps: 12 });
   const [generating, setGenerating] = useState(false);
-  const [exploring, setExploring] = useState(false);
   const [apiBase, setApiBase] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [modelName, setModelName] = useState('gpt-4o-mini');
@@ -348,17 +342,6 @@ function App() {
       setAllTags(Array.from(tags).sort());
     } catch (e) {
       console.error('Failed to fetch cases', e);
-    }
-  };
-
-  const fetchExploreRuns = async () => {
-    try {
-      const res = await axios.get('/api/runs');
-      const list = (res.data || []) as RunSummary[];
-      const explores = list.filter((r) => r.type === 'explore' || (r.case_id || '').startsWith('explore:'));
-      setExploreRuns(explores.slice(0, 50));
-    } catch (e) {
-      setExploreRuns([]);
     }
   };
 
@@ -613,7 +596,6 @@ function App() {
     fetchCases();
     fetchSuites();
     loadSettings();
-    fetchExploreRuns();
   }, []);
 
   const filteredCases = useMemo(() => {
@@ -746,7 +728,6 @@ function App() {
 
   useEffect(() => {
     if (!selectedCase) return;
-    if (selectedCase.type === 'explore') return;
     const pending = pendingRunToOpen && pendingRunToOpen.case_id === selectedCase.id ? pendingRunToOpen : null;
     setLogs([]);
     setScreenshot(null);
@@ -1171,38 +1152,6 @@ function App() {
     }
   };
 
-  const handleDeleteExploreRun = async (r: RunSummary) => {
-    if (!r?.id) return;
-    const name = (r.explore?.case_name || '').trim() || (typeof r.case_id === 'string' && r.case_id.startsWith('explore:') ? r.case_id.slice('explore:'.length) : r.id);
-    const ok = await confirmAction({
-      title: '删除探索记录',
-      description: r.status === 'running'
-        ? `该探索记录当前标记为 running。\n\n- 如果仍在执行，删除会失败（为了避免留下后台进程）。\n- 如果是“假 running”（例如服务重启导致状态没更新），可以尝试删除用于清理。\n\n确认删除探索记录「${name}」？仅删除本次探索的运行记录与截图，不会删除已生成的用例。`
-        : `确认删除探索记录「${name}」？仅删除本次探索的运行记录与截图，不会删除已生成的用例。`,
-      confirmText: '删除记录',
-      destructive: true
-    });
-    if (!ok) return;
-    try {
-      await axios.delete(`/api/runs/${r.id}`);
-      await fetchExploreRuns();
-      if (selectedRunId === r.id) {
-        setSelectedRunId(null);
-        setSelectedRun(null);
-        setScreenshot(null);
-        setSelectedShotFile(null);
-        if (selectedCase?.type === 'explore') {
-          setSelectedCase(null);
-          setCaseDoc(null);
-          setScriptContent('');
-        }
-      }
-      setLogs((prev) => [...prev, '✅ 探索记录已删除']);
-    } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ 删除探索记录失败: ${e.response?.data?.error || e.message}`]);
-    }
-  };
-
   const handleGenerateCase = async () => {
     if (!generateForm.name.trim() || !generateForm.instruction.trim()) {
       alert('用例名称和自然语言指令不能为空！');
@@ -1229,78 +1178,6 @@ function App() {
     }
   };
 
-  const handleExplore = async () => {
-    if (!exploreForm.name.trim() || !exploreForm.start_url.trim() || !exploreForm.goal.trim()) {
-      alert('用例名称、初始 URL 和目标描述不能为空！');
-      return;
-    }
-    setExploring(true);
-    setIsRunning(true);
-    setLogs(['🧭 探索模式启动中...']);
-    setScreenshot(null);
-    setSelectedRun(null);
-    try {
-      const res = await axios.post('/api/explore', { ...exploreForm, max_steps: Number(exploreForm.max_steps) || 12 });
-      const sessionId = res.data.session_id;
-      const runId = res.data.run_id || sessionId;
-      
-      setSelectedCase({ id: 'explore_temp', name: `[探索] ${exploreForm.name}`, type: 'explore' });
-      setCaseDoc({ id: 'explore_temp', name: exploreForm.name, start_url: exploreForm.start_url, steps: [] });
-      setLeftTab('editor');
-      
-      setSelectedRunId(runId);
-      setShowExploreModal(false);
-      void fetchExploreRuns();
-
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/run/${sessionId}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'log') {
-          setLogs(prev => [...prev, data.message]);
-        } else if (data.type === 'screenshot') {
-          setScreenshot(data.data);
-        } else if (data.type === 'status') {
-          if (data.status === 'completed' || data.status === 'failed') {
-            setIsRunning(false);
-            setExploring(false);
-            setLogs(prev => [...prev, `🏁 探索结束，状态: ${formatStatus(data.status)}`]);
-            void fetchExploreRuns();
-            ws.close();
-            void (async () => {
-              try {
-                const detail = await axios.get(`/api/runs/${runId}`);
-                const genId = detail.data?.explore?.generated_case_id;
-                if (genId) {
-                  setLogs(prev => [...prev, `✅ 已生成用例: ${genId}`]);
-                  await fetchCases();
-                  setSelectedCase({ id: genId, name: exploreForm.name, type: 'recorded' });
-                  void fetchExploreRuns();
-                } else if (data.status === 'completed') {
-                  setLogs(prev => [...prev, `⚠️ 探索完成，但未找到生成的用例记录`]);
-                }
-              } catch {
-              }
-            })();
-          }
-        }
-      };
-
-      ws.onerror = () => {
-        setLogs(prev => [...prev, '❌ WebSocket 连接错误']);
-        setIsRunning(false);
-        setExploring(false);
-      };
-    } catch (e: any) {
-      setLogs(prev => [...prev, `❌ 启动失败: ${e.response?.data?.error || e.message}`]);
-      setIsRunning(false);
-      setExploring(false);
-    }
-  };
-
   const handleStop = async () => {
     if (selectedRunId) {
       try {
@@ -1315,7 +1192,6 @@ function App() {
       wsRef.current.close();
     }
     setIsRunning(false);
-    setExploring(false);
   };
 
   const handleExitReplay = () => {
@@ -1355,7 +1231,7 @@ function App() {
     }
   };
 
-  const isReplayMode = !!selectedRunId && (!isRunning || selectedCase?.type === 'explore');
+  const isReplayMode = !!selectedRunId && !isRunning;
 
   const formatShotTime = (ms?: number) => {
     if (!ms) return '';
@@ -1447,8 +1323,8 @@ function App() {
             <div className="flex items-center gap-2">
               <SquareTerminal className="text-[#00e5ff] w-5 h-5 drop-shadow-[0_0_8px_rgba(99,102,241,0.45)]" />
               <div className="flex flex-col">
-                <h1 className="text-sm font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-[#00e5ff] to-[#00ff41] leading-tight font-mono drop-shadow-[0_0_10px_rgba(0,229,255,0.3)]">SOLO TEST</h1>
-                <div className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase">System Active</div>
+                <h1 className="text-sm font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-[#00e5ff] to-[#00ff41] leading-tight font-mono drop-shadow-[0_0_10px_rgba(0,229,255,0.3)]">SOLO 测试</h1>
+                <div className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase">系统运行中</div>
               </div>
             </div>
             <button onClick={() => { loadSettings(); setShowSettings(true); }} className="p-2 hover:bg-[#00e5ff]/10 rounded-xl text-zinc-400 hover:text-[#00e5ff] transition" title="设置">
@@ -1464,90 +1340,11 @@ function App() {
               <Plus className="w-4 h-4 text-[#00e5ff]" />
               <span>NL2Case <span className="text-xs text-zinc-400 font-normal ml-1">自然语言生成用例</span></span>
             </button>
-            <button
-              onClick={() => setShowExploreModal(true)}
-              className="w-full bg-zinc-800/50 hover:bg-zinc-700/80 text-zinc-200 text-sm font-medium px-3 py-2 rounded-xl flex items-center justify-center gap-2 transition-all border border-zinc-700/50 hover:border-zinc-600"
-              title="跑通新页面流程并生成可回归用例"
-            >
-              <MonitorPlay className="w-4 h-4 text-emerald-400" />
-              <span>探索模式 <span className="text-xs text-zinc-400 font-normal ml-1">自动跑通新页面</span></span>
-            </button>
           </div>
         </div>
         
         <div className="p-3 flex-1 flex flex-col overflow-hidden">
-          <div className="mt-4">
-            <div className="flex items-center justify-between px-1 mb-2">
-              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">探索用例（运行记录）</div>
-              <button
-                onClick={fetchExploreRuns}
-                className="p-1 hover:bg-[#00e5ff]/10 rounded-md text-zinc-400 hover:text-[#00e5ff] transition"
-                title="刷新探索记录"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <ul className="rounded-xl border border-[#1f2937] divide-y divide-zinc-800 bg-black/20 overflow-hidden">
-              {exploreRuns.map((r) => {
-                const name = (r.explore?.case_name || '').trim() || (typeof r.case_id === 'string' && r.case_id.startsWith('explore:') ? r.case_id.slice('explore:'.length) : r.id);
-                const active = selectedCase?.type === 'explore' && selectedRunId === r.id;
-                const statusText = r.status ? formatStatus(r.status) : '';
-                const canDelete = true;
-                return (
-                  <li key={r.id}>
-                    <div
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
-                        active ? 'bg-emerald-500/10 text-emerald-200 border-emerald-500/20' : 'text-zinc-400 hover:bg-[#00e5ff]/10 hover:text-zinc-200'
-                      }`}
-                    >
-                      <button
-                        onClick={() => {
-                          setSelectedSuiteId(null);
-                          setSuiteDoc(null);
-                          setSelectedSuiteRunId(null);
-                          setSelectedSuiteRun(null);
-                          setCaseDoc(null);
-                          setScriptContent('');
-                          setSelectedCase({ id: 'explore_temp', name: `[探索] ${name}`, type: 'explore' });
-                          setSelectedRunId(r.id);
-                          loadRunDetail(r.id);
-                        }}
-                        className="flex-1 min-w-0 flex items-center gap-2 text-left"
-                      >
-                        <MonitorPlay className="w-4 h-4 opacity-80 shrink-0 text-emerald-400" />
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate">{name}</div>
-                          <div className="text-[11px] text-zinc-500 font-mono truncate">
-                            {statusText}{r.started_at ? ` · ${formatRunTime(r.started_at)}` : ''}
-                          </div>
-                        </div>
-                      </button>
-                      {r.explore?.generated_case_id && (
-                        <span className="text-[10px] px-2 py-1 rounded-lg border border-[#00e5ff]/30 bg-[#00e5ff]/10 text-indigo-300 font-mono">
-                          已生成
-                        </span>
-                      )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); void handleDeleteExploreRun(r); }}
-                        disabled={!canDelete}
-                        className={`p-1.5 rounded-md border transition-colors ${
-                          canDelete ? 'border-transparent hover:border-rose-900 hover:bg-rose-500/10 text-zinc-500 hover:text-rose-400' : 'border-transparent text-zinc-700 cursor-not-allowed'
-                        }`}
-                        title={r.status === 'running' ? '尝试删除（若仍在运行会失败）' : '删除探索记录'}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-              {exploreRuns.length === 0 && (
-                <div className="text-xs text-zinc-600 p-3 text-center">暂无探索记录</div>
-              )}
-            </ul>
-          </div>
-
-          <div className="mt-5 flex items-center justify-between px-1 mb-2">
+          <div className="mt-4 flex items-center justify-between px-1 mb-2">
             <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
               普通用例
             </div>
@@ -1602,7 +1399,7 @@ function App() {
                     onClick={() => { setSelectedSuiteId(null); setSuiteDoc(null); setSelectedSuiteRunId(null); setSelectedSuiteRun(null); setSelectedCase(c); }}
                     className="flex-1 min-w-0 flex items-center gap-2 text-left"
                   >
-                    <FileJson className={`w-4 h-4 opacity-70 shrink-0 ${c.tags?.includes('explore') ? 'text-emerald-400' : ''}`} />
+                    <FileJson className="w-4 h-4 opacity-70 shrink-0" />
                     <div className="flex flex-col min-w-0">
                       <span className="truncate">{c.name}</span>
                       {c.tags && c.tags.length > 0 && (
@@ -1613,9 +1410,6 @@ function App() {
                           {c.tags.length > 3 && <span className="text-[9px] text-zinc-500">+{c.tags.length - 3}</span>}
                         </div>
                       )}
-                      {(!c.tags || c.tags.length === 0) ? null : (c.tags.includes('explore') ? (
-                        <div className="text-[10px] text-emerald-400/80 font-medium mt-0.5">探索生成</div>
-                      ) : null)}
                     </div>
                   </button>
                   <button
@@ -1967,34 +1761,30 @@ function App() {
                     <div className="text-sm font-semibold text-zinc-200 truncate max-w-[520px]">{selectedCase.name}</div>
                     {isReplayMode && (
                       <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#1f2937] text-zinc-400 bg-[#030712]/90">
-                        {selectedCase?.type === 'explore' ? '探索' : '回放'}
+                        回放
                       </span>
                     )}
-                    {selectedCase?.type !== 'explore' && (
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${isDirty ? 'border-amber-500 text-amber-500' : 'border-[#1f2937] text-zinc-500'}`}>
-                        {isDirty ? '未保存' : '已保存'}
-                      </span>
-                    )}
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full border ${isDirty ? 'border-amber-500 text-amber-500' : 'border-[#1f2937] text-zinc-500'}`}>
+                      {isDirty ? '未保存' : '已保存'}
+                    </span>
                   </div>
                   <div className="text-[11px] text-zinc-500 font-mono">
-                    {selectedCase?.type === 'explore' ? '自动探索模式' : `CaseID: ${selectedCase.id}`}
+                    {`CaseID: ${selectedCase.id}`}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                {selectedCase?.type !== 'explore' && (
-                  <select
-                    value={selectedEnvId}
-                    onChange={(e) => setSelectedEnvId(e.target.value)}
-                    className="bg-[#0a0e17]/80 backdrop-blur-xl border border-[#1f2937] rounded-xl px-2 py-1.5 text-sm text-zinc-300 outline-none focus:border-indigo-400"
-                  >
-                    <option value="">默认环境</option>
-                    {envs.map(env => (
-                      <option key={env.id} value={env.id}>{env.name}</option>
-                    ))}
-                  </select>
-                )}
-                {!isReplayMode && selectedCase?.type !== 'explore' && (
+                <select
+                  value={selectedEnvId}
+                  onChange={(e) => setSelectedEnvId(e.target.value)}
+                  className="bg-[#0a0e17]/80 backdrop-blur-xl border border-[#1f2937] rounded-xl px-2 py-1.5 text-sm text-zinc-300 outline-none focus:border-indigo-400"
+                >
+                  <option value="">默认环境</option>
+                  {envs.map(env => (
+                    <option key={env.id} value={env.id}>{env.name}</option>
+                  ))}
+                </select>
+                {!isReplayMode && (
                   <>
                       <button
                         onClick={handleRestoreBackup}
@@ -2023,7 +1813,7 @@ function App() {
                     </button>
                   </>
                 )}
-                {isReplayMode && selectedCase?.type !== 'explore' && (
+                {isReplayMode && (
                   <button
                     onClick={handleExitReplay}
                     className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-[#1f2937]"
@@ -2032,14 +1822,12 @@ function App() {
                   </button>
                 )}
                 {!(isRunning || selectedRun?.status === 'running') ? (
-                  selectedCase?.type !== 'explore' && (
-                    <button 
-                      onClick={handleRun}
-                      className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-400 hover:to-blue-400 text-zinc-100 px-5 py-1.5 rounded-xl text-sm font-medium transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.3)] hover:shadow-[0_0_25px_rgba(99,102,241,0.5)] border border-white/10"
-                    >
-                      <Play className="w-4 h-4 fill-current" /> 运行测试
-                    </button>
-                  )
+                  <button 
+                    onClick={handleRun}
+                    className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-400 hover:to-blue-400 text-zinc-100 px-5 py-1.5 rounded-xl text-sm font-medium transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.3)] hover:shadow-[0_0_25px_rgba(99,102,241,0.5)] border border-white/10"
+                  >
+                    <Play className="w-4 h-4 fill-current" /> 运行测试
+                  </button>
                 ) : (
                   <button 
                     onClick={handleStop}
@@ -2061,7 +1849,7 @@ function App() {
                     <div className="px-4 py-2 bg-[#0a0e17]/80 backdrop-blur-xl text-xs font-semibold text-zinc-400 flex items-center justify-between border-b border-[#1f2937]">
                       <div className="flex items-center gap-2">
                         <History className="w-3.5 h-3.5" />
-                        {selectedCase?.type === 'explore' ? '探索运行详情' : '运行回放'}
+                        运行回放
                       </div>
                       <div className="text-xs text-zinc-500 font-mono">
                         {selectedRun ? `${formatStatus(selectedRun.status)} ${formatRunTime(selectedRun.started_at)}` : selectedRunId}
@@ -2120,33 +1908,6 @@ function App() {
                               Token: <span className="text-indigo-300 font-mono">{formatTokenUsage(selectedRun.token_usage)}</span>
                             </div>
                           </div>
-                          
-                          {selectedRun.explore?.generated_case_id && (
-                            <div className="bg-[#00e5ff]/10 border border-[#00e5ff]/30 rounded-xl p-4 flex items-center justify-between">
-                              <div>
-                                <div className="text-xs font-semibold text-[#00e5ff] mb-1">已成功生成普通用例</div>
-                                <div className="text-[11px] text-[#00e5ff]/70 font-mono">{selectedRun.explore.generated_case_id}</div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  const c = cases.find(x => x.id === selectedRun.explore.generated_case_id);
-                                  if (c) {
-                                    setSelectedSuiteId(null);
-                                    setSuiteDoc(null);
-                                    setSelectedSuiteRunId(null);
-                                    setSelectedSuiteRun(null);
-                                    setSelectedCase({ id: c.id, name: c.name, type: c.type });
-                                    setSelectedRunId(null);
-                                  } else {
-                                    alert('用例尚未加载，请先刷新用例列表');
-                                  }
-                                }}
-                                className="px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-medium rounded-lg transition-colors border border-[#00e5ff]/30"
-                              >
-                                去查看
-                              </button>
-                            </div>
-                          )}
 
                           <div className="pt-2 border-t border-[#1f2937]">
                             <div className="text-xs font-semibold text-zinc-500 mb-3">
@@ -2819,10 +2580,10 @@ function App() {
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#00e5ff]/10 rounded-full blur-[100px] pointer-events-none" />
             <div className="relative z-10 flex flex-col items-center p-12 rounded-3xl border border-[#00e5ff]/20 bg-[#0a0e17]/80 backdrop-blur-xl shadow-[0_0_50px_rgba(0,229,255,0.05)]">
               <SquareTerminal className="w-20 h-20 mb-8 text-[#00e5ff] drop-shadow-[0_0_20px_rgba(0,229,255,0.4)] animate-pulse-slow" />
-              <h2 className="text-3xl font-bold font-mono tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-[#00e5ff] to-[#00ff41] mb-4 drop-shadow-[0_0_10px_rgba(0,229,255,0.2)]">SOLO TESTING INTERFACE</h2>
+              <h2 className="text-3xl font-bold font-mono tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-[#00e5ff] to-[#00ff41] mb-4 drop-shadow-[0_0_10px_rgba(0,229,255,0.2)]">SOLO 测试控制台</h2>
               <p className="text-sm font-mono text-zinc-400 flex items-center gap-3">
                 <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#00ff41] shadow-[0_0_10px_#00ff41] animate-pulse" />
-                WAITING FOR INSTRUCTIONS
+                等待指令
               </p>
             </div>
           </div>
@@ -3292,113 +3053,6 @@ function App() {
               >
                 {generating ? <RotateCw className="w-5 h-5 animate-spin" /> : <Terminal className="w-5 h-5" />}
                 {generating ? 'AI 拆解生成中...' : '开始生成用例'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showExploreModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl shadow-indigo-500/20 w-full max-w-4xl p-10 flex flex-col relative overflow-hidden">
-            <div className="absolute -top-40 -left-40 w-96 h-96 bg-[#00e5ff]/15 rounded-full blur-[100px] pointer-events-none" />
-            <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none" />
-
-            <div className="relative z-10 flex items-start justify-between mb-8">
-              <div>
-                <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-zinc-100 to-zinc-400 flex items-center gap-3 mb-2">
-                  <div className="p-2.5 bg-[#00e5ff]/10 rounded-xl border border-[#00e5ff]/30">
-                    <MonitorPlay className="w-6 h-6 text-[#00e5ff]" />
-                  </div>
-                  探索模式（跑通后生成用例）
-                </h2>
-                <p className="text-sm text-zinc-500 pl-14">用于全新页面/全新流程：AI 先探索跑通并生成可回归的 steps（含 selector 与 intent）。</p>
-              </div>
-              <button onClick={() => { if (!exploring) setShowExploreModal(false); }} disabled={exploring} className="text-zinc-500 hover:text-zinc-200 transition-colors bg-[#00e5ff]/5 hover:bg-[#00e5ff]/20 p-2 rounded-full disabled:opacity-50">
-                <XCircle className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="relative z-10 space-y-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-400 mb-2 uppercase tracking-wider pl-1">用例名称</label>
-                  <input
-                    type="text"
-                    value={exploreForm.name}
-                    onChange={e => setExploreForm({ ...exploreForm, name: e.target.value })}
-                    className="w-full bg-black/40 border border-[#00e5ff]/10 rounded-2xl px-5 py-3.5 text-base text-zinc-200 focus:outline-none focus:border-[#00e5ff]/50 focus:ring-1 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600 shadow-inner"
-                    placeholder="例如：授权链路（探索生成）"
-                    disabled={exploring}
-                    autoFocus
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-400 mb-2 uppercase tracking-wider pl-1">初始 URL (Start URL)</label>
-                  <input
-                    type="text"
-                    value={exploreForm.start_url}
-                    onChange={e => setExploreForm({ ...exploreForm, start_url: e.target.value })}
-                    className="w-full bg-black/40 border border-[#00e5ff]/10 rounded-2xl px-5 py-3.5 text-base text-zinc-200 focus:outline-none focus:border-[#00e5ff]/50 focus:ring-1 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600 shadow-inner"
-                    placeholder="例如：https://example.com"
-                    disabled={exploring}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-400 mb-2 uppercase tracking-wider pl-1">目标（Goal）</label>
-                <textarea
-                  value={exploreForm.goal}
-                  onChange={e => setExploreForm({ ...exploreForm, goal: e.target.value })}
-                  className="w-full bg-black/40 border border-[#00e5ff]/10 rounded-2xl px-5 py-4 text-base text-zinc-200 focus:outline-none focus:border-[#00e5ff]/50 focus:ring-1 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600 shadow-inner min-h-[200px] custom-scrollbar resize-none leading-relaxed"
-                  placeholder={`描述你希望 AI 跑通的流程目标。\n\n例如：\n1. 打开授权页面\n2. 搜索“AI小车”\n3. 勾选并点击确认授权`}
-                  disabled={exploring}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-400 mb-2 uppercase tracking-wider pl-1">成功标志（可选）</label>
-                  <input
-                    type="text"
-                    value={exploreForm.done_hint}
-                    onChange={e => setExploreForm({ ...exploreForm, done_hint: e.target.value })}
-                    className="w-full bg-black/40 border border-[#00e5ff]/10 rounded-2xl px-5 py-3.5 text-base text-zinc-200 focus:outline-none focus:border-[#00e5ff]/50 focus:ring-1 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600 shadow-inner"
-                    placeholder="例如：同步成功 / 授权成功"
-                    disabled={exploring}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-400 mb-2 uppercase tracking-wider pl-1">最大步数</label>
-                  <input
-                    type="number"
-                    value={exploreForm.max_steps}
-                    onChange={e => setExploreForm({ ...exploreForm, max_steps: Number(e.target.value) })}
-                    className="w-full bg-black/40 border border-[#00e5ff]/10 rounded-2xl px-5 py-3.5 text-base text-zinc-200 focus:outline-none focus:border-[#00e5ff]/50 focus:ring-1 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600 shadow-inner"
-                    min={3}
-                    max={50}
-                    disabled={exploring}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="relative z-10 mt-10 flex justify-end gap-4">
-              <button
-                onClick={() => setShowExploreModal(false)}
-                disabled={exploring}
-                className="px-6 py-3 rounded-xl text-base font-medium text-zinc-400 bg-[#00e5ff]/5 hover:bg-[#00e5ff]/20 border border-transparent hover:border-[#00e5ff]/10 transition-all disabled:opacity-50"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleExplore}
-                disabled={exploring}
-                className="px-8 py-3 rounded-xl text-base font-medium text-zinc-100 bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-400 hover:to-blue-400 flex items-center gap-2 transition-all duration-300 shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:shadow-[0_0_30px_rgba(99,102,241,0.5)] disabled:opacity-50 disabled:shadow-none"
-              >
-                {exploring ? <RotateCw className="w-5 h-5 animate-spin" /> : <MonitorPlay className="w-5 h-5" />}
-                {exploring ? '探索中...' : '开始探索并生成用例'}
               </button>
             </div>
           </div>

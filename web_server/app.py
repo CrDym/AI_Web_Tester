@@ -80,6 +80,7 @@ def _case_doc_from_model(c: CaseModel) -> Dict[str, Any]:
         "start_url": getattr(c, "start_url", None),
         "steps": json.loads(c.steps) if c.steps else [],
         "tags": json.loads(c.tags) if getattr(c, "tags", None) else [],
+        "dataset": json.loads(c.dataset) if getattr(c, "dataset", None) else [],
         "created_at": getattr(c, "created_at", None),
         "updated_at": getattr(c, "updated_at", None),
     }
@@ -347,11 +348,16 @@ def _make_ai_fix_suggestion(run_meta: Dict[str, Any], case_doc: Dict[str, Any], 
 def _build_python_script(case: Dict[str, Any]) -> str:
     start_url = case.get("start_url")
     steps = case.get("steps") or []
+    dataset = case.get("dataset") or []
+    if not dataset:
+        dataset = [{}]
 
     lines: List[str] = []
     lines.append("import os")
     lines.append("import re")
     lines.append("import sys")
+    lines.append("import json")
+    lines.append("import pytest")
     lines.append("from dotenv import load_dotenv")
     lines.append("")
     lines.append("sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), 'src')))")
@@ -359,17 +365,26 @@ def _build_python_script(case: Dict[str, Any]) -> str:
     lines.append("")
     lines.append("from ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer")
     lines.append("")
+    lines.append(f"dataset = {json.dumps(dataset, ensure_ascii=False)}")
     lines.append("")
-    lines.append("def test_recorded_flow(page):")
+    lines.append("@pytest.mark.parametrize('dataset_row', dataset)")
+    lines.append("def test_recorded_flow(page, dataset_row):")
     lines.append("    driver = PlaywrightDriver(page)")
     lines.append("    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)")
     lines.append("    healer = SelfHealer(use_vision=True) if os.environ.get('OPENAI_API_KEY') else None")
+    lines.append("")
+    lines.append("    def _replace_vars(text):")
+    lines.append("        if not isinstance(text, str): return text")
+    lines.append("        for k, v in dataset_row.items():")
+    lines.append("            text = text.replace(f'${{{k}}}', str(v))")
+    lines.append("        return text")
     lines.append("")
     lines.append("    driver.get_screenshot()")
     lines.append("")
     if start_url:
         safe_url = start_url.replace('"', "%22")
-        lines.append(f'    page.goto("{safe_url}", wait_until="domcontentloaded", timeout=60000)')
+        lines.append(f'    resolved_url = _replace_vars("{safe_url}")')
+        lines.append(f'    page.goto(resolved_url, wait_until="domcontentloaded", timeout=60000)')
         lines.append("    page.wait_for_timeout(1000)")
         lines.append("    driver.get_screenshot()")
         lines.append("")
@@ -385,11 +400,11 @@ def _build_python_script(case: Dict[str, Any]) -> str:
         value = step.get("value")
         intent = (step.get("intent") or f"Step {idx+1}").replace('"', "'")
 
-        lines.append(f"    selector_{idx} = \"{selector}\"")
+        lines.append(f"    selector_{idx} = _replace_vars(\"{selector}\")")
         value_literal = json.dumps(value if value is not None else "")
         intent_literal = json.dumps(intent)
-        lines.append(f"    step_value_{idx} = {value_literal}")
-        lines.append(f"    step_intent_{idx} = {intent_literal}")
+        lines.append(f"    step_value_{idx} = _replace_vars({value_literal})")
+        lines.append(f"    step_intent_{idx} = _replace_vars({intent_literal})")
         if stype == "input":
             lines.append(f"    if not step_value_{idx}:")
             lines.append(f"        m = re.search(r\"输入\\s*[\\\"'“”](.+?)[\\\"'“”]\", step_intent_{idx})")
@@ -412,23 +427,21 @@ def _build_python_script(case: Dict[str, Any]) -> str:
         if stype == "input":
             lines.append(f"        driver.perform_action(\"type\", f\"SELECTOR:{{selector_{idx}}}\", step_value_{idx})")
         elif stype == "wait":
-            ms = int(value or 1000)
-            lines.append(f"        current_page.wait_for_timeout({ms})")
+            lines.append(f"        ms = int(step_value_{idx} or 1000) if str(step_value_{idx}).isdigit() else 1000")
+            lines.append(f"        current_page.wait_for_timeout(ms)")
         elif stype == "assert":
             assert_type = step.get("assert_type") or "text"
-            safe_val = (value or "").replace('\"', '\\\\\"')
             if assert_type == "text":
                 lines.append("        try:")
-                lines.append(f"            driver._get_locator('text=\"{safe_val}\"').wait_for(state='visible', timeout=3000)")
+                lines.append(f"            driver._get_locator(f'text=\"{{step_value_{idx}}}\"').wait_for(state='visible', timeout=3000)")
                 lines.append("        except Exception:")
-                lines.append(f"            assert \"{safe_val}\" in current_page.content(), '断言失败: 页面不包含文本 \"{safe_val}\"'")
+                lines.append(f"            assert step_value_{idx} in current_page.content(), f'断言失败: 页面不包含文本 \"{{step_value_{idx}}}\"'")
             elif assert_type == "url":
-                lines.append(f"        assert \"{safe_val}\" in current_page.url, '断言失败: URL 不包含 \"{safe_val}\"'")
+                lines.append(f"        assert step_value_{idx} in current_page.url, f'断言失败: URL 不包含 \"{{step_value_{idx}}}\"'")
             elif assert_type == "visible":
                 lines.append(f"        driver._get_locator(selector_{idx}).wait_for(state='visible', timeout=3000)")
         elif stype in ["hover", "select_option", "double_click", "right_click", "press_key", "scroll", "click"]:
-            safe_val = (value or "").replace('\"', '\\\\\"')
-            lines.append(f"        driver.perform_action(\"{stype}\", f\"SELECTOR:{{selector_{idx}}}\", \"{safe_val}\")")
+            lines.append(f"        driver.perform_action(\"{stype}\", f\"SELECTOR:{{selector_{idx}}}\", step_value_{idx})")
         else:
             lines.append(f"        driver.perform_action(\"click\", f\"SELECTOR:{{selector_{idx}}}\")")
 
@@ -458,8 +471,7 @@ def _build_python_script(case: Dict[str, Any]) -> str:
             lines.append("                new_sel = new_id.replace('SELECTOR:', '') if str(new_id).startswith('SELECTOR:') else f'[ai-id=\"{new_id}\"]'")
             lines.append("                driver.page.wait_for_selector(new_sel, state='visible', timeout=3000)")
         elif stype in ["hover", "select_option", "double_click", "right_click", "press_key", "scroll", "click"]:
-            safe_val = (value or "").replace('\"', '\\\\\"')
-            lines.append(f"                driver.perform_action(\"{stype}\", new_id, \"{safe_val}\")")
+            lines.append(f"                driver.perform_action(\"{stype}\", new_id, step_value_{idx})")
         else:
             lines.append("                driver.perform_action(\"click\", new_id)")
         lines.append(f"                print(f\"   ✨ [Step {idx+1}] AI 候选定位验证通过（执行成功）\", flush=True)")
@@ -560,7 +572,7 @@ async def generate_case(req: GenerateCaseReq):
                 type="json",
                 start_url=req.start_url,
                 steps=json.dumps(data.get("steps", [])),
-                tags=json.dumps(["explore", "auto_generated"]),
+                tags=json.dumps(["auto_generated"]),
                 created_at=int(time.time()),
                 updated_at=int(time.time())
             )
@@ -719,6 +731,7 @@ async def create_case(request: Request):
             start_url=data.get("start_url"),
             steps=json.dumps(data.get("steps", [])),
             tags=json.dumps(data.get("tags", [])),
+            dataset=json.dumps(data.get("dataset", [])),
             created_at=int(time.time()),
             updated_at=int(time.time())
         )
@@ -741,6 +754,7 @@ async def get_case(case_id: str):
             "start_url": getattr(c, "start_url", None),
             "steps": json.loads(c.steps) if c.steps else [],
             "tags": json.loads(c.tags) if c.tags else [],
+            "dataset": json.loads(c.dataset) if getattr(c, "dataset", None) else [],
             "created_at": c.created_at,
             "updated_at": c.updated_at
         })
@@ -759,6 +773,8 @@ async def update_case(case_id: str, request: Request):
         c.steps = json.dumps(data.get("steps", []))
         if "tags" in data:
             c.tags = json.dumps(data.get("tags", []))
+        if "dataset" in data:
+            c.dataset = json.dumps(data.get("dataset", []))
         if "name" in data:
             c.name = data.get("name")
         if "start_url" in data:
@@ -832,6 +848,15 @@ async def restore_case(case_id: str):
                     tags_val = []
             if isinstance(tags_val, list):
                 c.tags = json.dumps(tags_val)
+        if "dataset" in bak_doc:
+            ds_val = bak_doc.get("dataset") or []
+            if isinstance(ds_val, str):
+                try:
+                    ds_val = json.loads(ds_val)
+                except Exception:
+                    ds_val = []
+            if isinstance(ds_val, list):
+                c.dataset = json.dumps(ds_val)
         if "type" in bak_doc and bak_doc.get("type"):
             c.type = bak_doc.get("type")
 
@@ -916,6 +941,7 @@ async def get_case_script(case_id: str):
             "name": case_model.name,
             "start_url": case_model.start_url,
             "steps": json.loads(case_model.steps) if case_model.steps else [],
+            "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
             "type": case_model.type
         }
         return JSONResponse({"content": _build_python_script(case)})
@@ -958,6 +984,7 @@ async def ai_fix_suggest(run_id: str, req: RunFixSuggestReq):
             "name": case_model.name,
             "start_url": case_model.start_url,
             "steps": json.loads(case_model.steps) if case_model.steps else [],
+            "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
             "type": case_model.type
         }
     finally:
@@ -1255,6 +1282,7 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
                 "name": case_model.name,
                 "start_url": case_model.start_url,
                 "steps": json.loads(case_model.steps) if case_model.steps else [],
+                "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
                 "type": case_model.type
             }
     finally:

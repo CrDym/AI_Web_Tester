@@ -20,6 +20,7 @@ class CaseModel(Base):
     start_url = Column(String)
     steps = Column(Text) # JSON list
     tags = Column(Text) # JSON list
+    dataset = Column(Text) # JSON list
     created_at = Column(Integer)
     updated_at = Column(Integer)
 
@@ -44,7 +45,6 @@ class RunModel(Base):
     ended_at = Column(Integer)
     duration_ms = Column(Integer)
     token_usage = Column(Text) # JSON dict
-    explore = Column(Text) # JSON dict
     logs = Column(Text) # JSON list
     screenshots = Column(Text) # JSON list
 
