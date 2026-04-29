@@ -11,6 +11,46 @@ engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread"
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+def _table_columns(table: str) -> set:
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+    return {r[1] for r in rows}
+
+def _ensure_columns(table: str, columns: dict) -> None:
+    existing = _table_columns(table)
+    missing = [(name, ddl) for name, ddl in columns.items() if name not in existing]
+    if not missing:
+        return
+    with engine.connect() as conn:
+        for name, ddl in missing:
+            conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        conn.commit()
+
+def migrate_schema() -> None:
+    try:
+        _ensure_columns("cases", {
+            "description": "VARCHAR",
+            "dataset": "TEXT",
+        })
+        _ensure_columns("suites", {
+            "description": "VARCHAR",
+            "env_id": "VARCHAR",
+            "setup_case_id": "VARCHAR",
+        })
+        _ensure_columns("runs", {
+            "type": "VARCHAR",
+            "token_usage": "TEXT",
+            "logs": "TEXT",
+            "screenshots": "TEXT",
+            "failure_reason": "TEXT",
+            "schema_version": "INTEGER",
+        })
+        _ensure_columns("suite_runs", {
+            "case_runs": "TEXT",
+        })
+    except Exception:
+        return
+
 class CaseModel(Base):
     __tablename__ = "cases"
     id = Column(String, primary_key=True, index=True)
@@ -45,6 +85,8 @@ class RunModel(Base):
     ended_at = Column(Integer)
     duration_ms = Column(Integer)
     token_usage = Column(Text) # JSON dict
+    failure_reason = Column(Text) # JSON dict
+    schema_version = Column(Integer)
     logs = Column(Text) # JSON list
     screenshots = Column(Text) # JSON list
 
@@ -59,6 +101,7 @@ class SuiteRunModel(Base):
     case_runs = Column(Text) # JSON dict
 
 Base.metadata.create_all(bind=engine)
+migrate_schema()
 
 def get_db():
     db = SessionLocal()

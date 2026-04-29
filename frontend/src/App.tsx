@@ -1,8 +1,8 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Play, FileJson, Terminal, SquareTerminal, RefreshCw, XCircle, Plus, Save, Pencil, Trash2, History, RotateCw, Settings, MonitorPlay, Loader2, Search, Tag, Eye, Activity, ZoomIn, ZoomOut } from 'lucide-react';
 import axios from 'axios';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import CodeBlock from './components/CodeBlock';
+import DatasetEditor from './components/DatasetEditor';
 
 interface TestCase {
   id: string;
@@ -10,6 +10,11 @@ interface TestCase {
   type: string;
   tags?: string[];
   updated_at?: number;
+}
+
+interface FailureReason {
+  category: string;
+  message: string;
 }
 
 interface RunSummary {
@@ -21,6 +26,7 @@ interface RunSummary {
   ended_at?: number | null;
   duration_ms?: number | null;
   token_usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  failure_reason?: FailureReason | null;
 }
 
 interface HealEvent {
@@ -61,6 +67,7 @@ interface RunDetail {
   ai_fix_suggestion?: AIFixSuggestion;
   token_usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   token_summary?: any;
+  failure_reason?: FailureReason | null;
 }
 
 interface SuiteSummary {
@@ -162,92 +169,6 @@ interface EnvConfig {
   base_url: string;
 }
 
-const DatasetEditor = ({ caseDoc, setCaseDoc }: { caseDoc: CaseDoc; setCaseDoc: (c: CaseDoc) => void }) => {
-  const [text, setText] = useState(() => JSON.stringify(caseDoc.dataset || [], null, 2));
-  const [error, setError] = useState<string | null>(null);
-
-  const handleBlur = () => {
-    try {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) {
-        setError('数据集必须是一个 JSON 数组（List）');
-        return;
-      }
-      setError(null);
-      setCaseDoc({ ...caseDoc, dataset: parsed });
-      setText(JSON.stringify(parsed, null, 2));
-    } catch (e: any) {
-      setError('无效的 JSON 格式: ' + e.message);
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const content = ev.target?.result as string;
-      try {
-        let parsed: any[] = [];
-        if (file.name.endsWith('.csv')) {
-          const lines = content.split('\n').filter(line => line.trim() !== '');
-          if (lines.length < 2) {
-            setError('CSV 格式无效或无数据');
-            return;
-          }
-          const headers = lines[0].split(',').map(h => h.trim());
-          for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(',').map(v => v.trim());
-            const obj: any = {};
-            headers.forEach((h, idx) => {
-              obj[h] = values[idx] || '';
-            });
-            parsed.push(obj);
-          }
-        } else {
-          parsed = JSON.parse(content);
-          if (!Array.isArray(parsed)) {
-            setError('上传的 JSON 必须是一个数组');
-            return;
-          }
-        }
-        setError(null);
-        setCaseDoc({ ...caseDoc, dataset: parsed });
-        setText(JSON.stringify(parsed, null, 2));
-      } catch (err: any) {
-        setError('解析文件失败: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
-  return (
-    <div className="space-y-4 h-full flex flex-col">
-      <div className="flex items-start justify-between">
-        <div className="flex flex-col gap-1">
-          <span className="text-[13px] font-bold tracking-widest text-[#f4f4f5] uppercase">绑定数据集 (JSON Array)</span>
-          <span className="text-[11px] text-zinc-500 max-w-xl leading-relaxed">
-            运行时会自动使用 <code className="text-[#00e5ff] px-1 bg-[#00e5ff]/10 rounded">{'${变量名}'}</code> 替换用例中的内容。如果数组为空或未配置，则仅运行一次。
-          </span>
-        </div>
-        <label className="shrink-0 cursor-pointer bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20 text-[#00e5ff] border border-[#00e5ff]/30 px-4 py-2 rounded text-[11px] font-bold tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(0,229,255,0.05)] hover:shadow-[0_0_15px_rgba(0,229,255,0.2)]">
-          导入 JSON / CSV 文件
-          <input type="file" accept=".json,.csv" className="hidden" onChange={handleFileChange} />
-        </label>
-      </div>
-      {error && <div className="text-xs text-rose-500">{error}</div>}
-      <textarea
-        className="flex-1 w-full bg-[#0a0e17]/80 backdrop-blur-xl border border-[#00e5ff]/20 rounded-xl p-4 text-[13px] text-[#00e5ff] font-mono focus:outline-none focus:border-[#00e5ff]/50 focus:shadow-[0_0_20px_rgba(0,229,255,0.1)] transition-all custom-scrollbar leading-relaxed"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={handleBlur}
-        placeholder={`[\n  {\n    "username": "admin",\n    "password": "123"\n  },\n  {\n    "username": "guest",\n    "password": "456"\n  }\n]\n\n// 提示：如果你导入 CSV 文件，它会自动转化为上述的 JSON Array 格式。\n// 第一行（表头）会作为变量名（例如 username）。`}
-      />
-    </div>
-  );
-};
-
 function App() {
   const [cases, setCases] = useState<TestCase[]>([]);
   const [caseQuery, setCaseQuery] = useState('');
@@ -278,6 +199,7 @@ function App() {
   const [lastSaved, setLastSaved] = useState<string>('');
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
+  const [runFailureFilter, setRunFailureFilter] = useState<string>('');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null);
   const [pendingRunToOpen, setPendingRunToOpen] = useState<{ case_id: string; run_id: string } | null>(null);
@@ -622,6 +544,20 @@ function App() {
     }
   };
 
+  const runFailureCategories = useMemo(() => {
+    const set = new Set<string>();
+    runs.forEach((r) => {
+      const c = r.failure_reason?.category;
+      if (c) set.add(c);
+    });
+    return Array.from(set).sort();
+  }, [runs]);
+
+  const visibleRuns = useMemo(() => {
+    if (!runFailureFilter) return runs;
+    return runs.filter((r) => (r.failure_reason?.category || '') === runFailureFilter);
+  }, [runs, runFailureFilter]);
+
   const handleDeleteSuiteRun = async (e: React.MouseEvent, runId: string) => {
     e.stopPropagation();
     const ok = await confirmAction({
@@ -800,8 +736,80 @@ function App() {
     };
   }, [selectedSuiteRun]);
 
+  const collectPlaceholders = (doc: CaseDoc) => {
+    const re = /\$\{([^}]+)\}/g;
+    const locs: Array<{ key: string; where: string }> = [];
+    const scan = (val: any, where: string) => {
+      if (typeof val !== 'string' || val.indexOf('${') === -1) return;
+      for (const m of val.matchAll(re)) {
+        const k = (m[1] || '').trim();
+        if (k) locs.push({ key: k, where });
+      }
+    };
+    scan(doc.start_url, 'start_url');
+    (doc.steps || []).forEach((s, idx) => {
+      scan(s.selector, `steps[${idx}].selector`);
+      scan(s.value, `steps[${idx}].value`);
+      scan(s.intent, `steps[${idx}].intent`);
+      scan((s as any).url, `steps[${idx}].url`);
+    });
+    return locs;
+  };
+
+  const validateDataDriven = async (doc: CaseDoc, actionName: string) => {
+    const locs = collectPlaceholders(doc);
+    if (locs.length === 0) return true;
+    const keys = Array.from(new Set(locs.map(x => x.key))).sort();
+    const dataset = doc.dataset || [];
+    if (!Array.isArray(dataset)) {
+      alert(`数据集必须是 JSON 数组，才能${actionName}。`);
+      setLeftTab('dataset');
+      return false;
+    }
+    const badRows: number[] = [];
+    dataset.forEach((row, idx) => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) badRows.push(idx);
+    });
+    if (badRows.length > 0) {
+      alert(`数据集第 ${badRows.slice(0, 10).map(x => x + 1).join(', ')} 行不是对象，无法${actionName}。`);
+      setLeftTab('dataset');
+      return false;
+    }
+    if (dataset.length === 0) {
+      await confirmAction({
+        title: `缺少数据集`,
+        description: `用例包含变量占位符：${keys.join(', ')}\n\n请先在“数据集”页签配置数据（JSON/CSV）。`,
+        confirmText: '我知道了',
+        destructive: false
+      });
+      setLeftTab('dataset');
+      return false;
+    }
+    const missing: Array<{ row: number; key: string }> = [];
+    dataset.forEach((row: any, idx: number) => {
+      keys.forEach((k) => {
+        if (!(k in row)) missing.push({ row: idx, key: k });
+      });
+    });
+    if (missing.length > 0) {
+      const head = missing.slice(0, 12).map(m => `第${m.row + 1}行缺少 ${m.key}`).join('\n');
+      await confirmAction({
+        title: `数据集字段不完整`,
+        description: `用例需要变量：${keys.join(', ')}\n\n${head}${missing.length > 12 ? `\n... 共 ${missing.length} 处缺失` : ''}\n\n请补齐数据集后再${actionName}。`,
+        confirmText: '我知道了',
+        destructive: false
+      });
+      setLeftTab('dataset');
+      return false;
+    }
+    return true;
+  };
+
   const handleRun = async () => {
     if (!selectedCase) return;
+    if (!caseDoc) return;
+    const ok = await validateDataDriven(caseDoc, '运行');
+    if (!ok) return;
     
     setIsRunning(true);
     setLogs(['🚀 正在初始化测试环境...']);
@@ -1011,6 +1019,8 @@ function App() {
 
   const handleSave = async () => {
     if (!selectedCase || !caseDoc) return;
+    const ok = await validateDataDriven(caseDoc, '保存');
+    if (!ok) return;
     setSaving(true);
     try {
       await axios.put(`/api/cases/${selectedCase.id}`, {
@@ -1513,14 +1523,29 @@ function App() {
               <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
                 <History className="w-4 h-4" /> 运行历史
               </div>
-              <button
-                onClick={() => selectedCase && fetchRuns(selectedCase.id)}
-                disabled={!selectedCase || runsLoading}
-                className="p-2 rounded-xl hover:bg-[#00e5ff]/10 text-zinc-400 hover:text-[#00e5ff] disabled:opacity-50"
-                title="刷新"
-              >
-                <RotateCw className={`w-4 h-4 ${runsLoading ? 'animate-spin' : ''}`} />
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedCase && runs.length > 0 && (
+                  <select
+                    value={runFailureFilter}
+                    onChange={(e) => setRunFailureFilter(e.target.value)}
+                    className="bg-[#0a0e17]/80 backdrop-blur-xl border border-[#1f2937] rounded-lg px-2 py-1 text-[11px] text-zinc-300 outline-none focus:border-[#00e5ff]/50"
+                    title="按失败原因过滤"
+                  >
+                    <option value="">全部</option>
+                    {runFailureCategories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  onClick={() => { if (selectedCase) fetchRuns(selectedCase.id); }}
+                  disabled={!selectedCase || runsLoading}
+                  className="p-2 rounded-xl hover:bg-[#00e5ff]/10 text-zinc-400 hover:text-[#00e5ff] disabled:opacity-50"
+                  title="刷新"
+                >
+                  <RotateCw className={`w-4 h-4 ${runsLoading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
             </div>
             {!selectedCase ? (
               <div className="text-xs text-zinc-600 px-2">选择用例后展示</div>
@@ -1528,7 +1553,9 @@ function App() {
               <div className="text-xs text-zinc-600 px-2">暂无运行记录</div>
             ) : (
               <div className="max-h-48 overflow-y-auto space-y-1 px-2 custom-scrollbar">
-                {runs.map((r) => (
+                {visibleRuns.length === 0 ? (
+                  <div className="text-xs text-zinc-600 px-2 py-2">无匹配记录</div>
+                ) : visibleRuns.map((r) => (
                   <div
                     key={r.id}
                     onClick={() => loadRunDetail(r.id)}
@@ -1541,6 +1568,11 @@ function App() {
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`w-2 h-2 rounded-full shrink-0 ${r.status === 'completed' ? 'bg-emerald-500' : r.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'}`} />
                       <span className="truncate">{formatRunTime(r.started_at)} {formatStatus(r.status || 'running')}</span>
+                      {r.status === 'failed' && r.failure_reason?.category && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-rose-500/30 bg-rose-500/10 text-rose-300 font-mono">
+                          {r.failure_reason.category}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-[10px] text-[#00e5ff]/80 font-mono">{formatTokenUsage(r.token_usage)}</span>
@@ -1907,6 +1939,14 @@ function App() {
                             <div className="text-xs text-zinc-500">
                               Token: <span className="text-indigo-300 font-mono">{formatTokenUsage(selectedRun.token_usage)}</span>
                             </div>
+                            {selectedRun.status === 'failed' && selectedRun.failure_reason?.category && (
+                              <div className="text-xs text-zinc-500 mt-2">
+                                失败原因: <span className="text-rose-300 font-mono">{selectedRun.failure_reason.category}</span>
+                                {selectedRun.failure_reason.message ? (
+                                  <div className="mt-1 text-[11px] text-zinc-400 font-mono break-words">{selectedRun.failure_reason.message}</div>
+                                ) : null}
+                              </div>
+                            )}
                           </div>
 
                           <div className="pt-2 border-t border-[#1f2937]">
@@ -2100,24 +2140,19 @@ function App() {
                       )
                     ) : (
                       leftTab === 'python' ? (
-                        <SyntaxHighlighter
+                        <CodeBlock
+                          code={scriptContent}
                           language="python"
-                          style={vscDarkPlus}
-                          customStyle={{
-                            margin: 0,
-                            background: 'transparent',
-                            fontSize: '0.875rem',
-                            fontFamily: "'Fira Code', monospace"
-                          }}
-                          className="custom-scrollbar"
-                        >
-                          {scriptContent}
-                        </SyntaxHighlighter>
+                          className="custom-scrollbar text-[13px] font-mono"
+                        />
                       ) : leftTab === 'dataset' ? (
                         !caseDoc ? (
                           <div className="text-zinc-600 italic">加载中...</div>
                         ) : (
-                          <DatasetEditor key={caseDoc.id} caseDoc={caseDoc} setCaseDoc={setCaseDoc} />
+                          <DatasetEditor
+                            dataset={caseDoc.dataset || []}
+                            onChange={(ds) => setCaseDoc({ ...caseDoc, dataset: ds })}
+                          />
                         )
                       ) : (
                         !caseDoc ? (

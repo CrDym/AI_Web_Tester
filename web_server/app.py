@@ -7,7 +7,7 @@ import tempfile
 import base64
 import re
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 import os
 from fastapi.responses import JSONResponse
@@ -186,6 +186,57 @@ def _update_suites_case_ref(old_case_id: str, new_case_id: str) -> None:
     except Exception:
         return
 
+def _migrate_run_meta(meta: Any, meta_path: Optional[str] = None) -> Dict[str, Any]:
+    if not isinstance(meta, dict):
+        meta = {}
+    changed = False
+    if "schema_version" not in meta:
+        meta["schema_version"] = 2
+        changed = True
+    if "token_usage" not in meta or not isinstance(meta.get("token_usage"), dict):
+        meta["token_usage"] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        changed = True
+    if "logs" not in meta or not isinstance(meta.get("logs"), list):
+        meta["logs"] = []
+        changed = True
+    if "screenshots" not in meta or not isinstance(meta.get("screenshots"), list):
+        meta["screenshots"] = []
+        changed = True
+    if "heal_events" not in meta or not isinstance(meta.get("heal_events"), list):
+        meta["heal_events"] = []
+        changed = True
+    if "failure_reason" not in meta:
+        meta["failure_reason"] = None
+        changed = True
+    if "explore" in meta:
+        meta.pop("explore", None)
+        changed = True
+    if changed and meta_path:
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    return meta
+
+def _migrate_suite_run_meta(meta: Any, meta_path: Optional[str] = None) -> Dict[str, Any]:
+    if not isinstance(meta, dict):
+        meta = {}
+    changed = False
+    if "schema_version" not in meta:
+        meta["schema_version"] = 1
+        changed = True
+    if "summary" not in meta or not isinstance(meta.get("summary"), dict):
+        meta["summary"] = {}
+        changed = True
+    if changed and meta_path:
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    return meta
+
 def _list_suite_runs(suite_id: Optional[str] = None) -> List[Dict[str, Any]]:
     runs: List[Dict[str, Any]] = []
     if not os.path.exists(SUITE_RUNS_DIR):
@@ -199,6 +250,7 @@ def _list_suite_runs(suite_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 meta = json.load(f)
         except Exception:
             continue
+        meta = _migrate_suite_run_meta(meta, meta_path)
         if suite_id and meta.get("suite_id") != suite_id:
             continue
         runs.append({
@@ -228,6 +280,7 @@ def _list_runs(case_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 meta = json.load(f)
         except Exception:
             continue
+        meta = _migrate_run_meta(meta, meta_path)
         if case_id and meta.get("case_id") != case_id:
             continue
         runs.append({
@@ -238,6 +291,7 @@ def _list_runs(case_id: Optional[str] = None) -> List[Dict[str, Any]]:
             "ended_at": meta.get("ended_at"),
             "duration_ms": meta.get("duration_ms"),
             "token_usage": meta.get("token_usage") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "failure_reason": meta.get("failure_reason"),
         })
     runs.sort(key=lambda x: x.get("started_at") or 0, reverse=True)
     return runs
@@ -417,11 +471,12 @@ def _build_python_script(case: Dict[str, Any]) -> str:
                 lines.append(f"    print(f\"   💡 [Step {idx+1}] 建议：该意图包含“选择”，更稳的写法是拆分为 2 步：① 对搜索框输入『AI小车』② 点击下拉结果项（text=AI小车）。\", flush=True)")
 
         display_intent = intent if intent else "无意图"
-        display_action = stype
-        if stype in ["input", "wait", "assert", "hover", "select_option", "press_key", "scroll"] and value:
-            display_action += f"({value})"
+        lines.append(f"    action_type_{idx} = {json.dumps(stype)}")
+        lines.append(f"    action_show_{idx} = action_type_{idx}")
+        lines.append(f"    if action_type_{idx} in ['input','wait','assert','hover','select_option','press_key','scroll'] and step_value_{idx}:")
+        lines.append(f"        action_show_{idx} = action_show_{idx} + f\"({{step_value_{idx}}})\"")
 
-        lines.append(f"    print(f\"\\n▶️  [Step {idx+1}] 🎯 元素：'{{selector_{idx}}}' (意图: {display_intent})，动作：{display_action}\", flush=True)")
+        lines.append(f"    print(f\"\\n▶️  [Step {idx+1}] 🎯 元素：'{{selector_{idx}}}' (意图: {display_intent})，动作：{{action_show_{idx}}}\", flush=True)")
         lines.append("    try:")
         lines.append("        current_page = driver.switch_to_latest_page()")
         if stype == "input":
@@ -713,11 +768,78 @@ async def delete_suite(suite_id: str):
                 del active_runs[safe_id]
                 
     return JSONResponse({"status": "success"})
+
+_PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+
+def _extract_placeholders(val: Any) -> List[str]:
+    if not isinstance(val, str) or "${" not in val:
+        return []
+    out: List[str] = []
+    for m in _PLACEHOLDER_RE.finditer(val):
+        k = (m.group(1) or "").strip()
+        if k:
+            out.append(k)
+    return out
+
+def _collect_case_placeholders(case_doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    locs: List[Dict[str, Any]] = []
+    for k in _extract_placeholders(case_doc.get("start_url")):
+        locs.append({"key": k, "field": "start_url"})
+    steps = case_doc.get("steps") or []
+    if isinstance(steps, list):
+        for i, st in enumerate(steps):
+            if not isinstance(st, dict):
+                continue
+            for field in ("selector", "value", "intent", "url"):
+                for k in _extract_placeholders(st.get(field)):
+                    locs.append({"key": k, "field": field, "step_index": i})
+    return locs
+
+def _validate_case_placeholders_or_raise(case_doc: Dict[str, Any]) -> None:
+    dataset = case_doc.get("dataset") or []
+    if dataset is None:
+        dataset = []
+    if not isinstance(dataset, list):
+        raise HTTPException(status_code=400, detail={"error": "dataset 必须是 JSON 数组"})
+    bad_rows = [i for i, row in enumerate(dataset) if not isinstance(row, dict)]
+    if bad_rows:
+        raise HTTPException(status_code=400, detail={"error": "dataset 每一行必须是 JSON 对象", "bad_rows": bad_rows[:20]})
+
+    locs = _collect_case_placeholders(case_doc)
+    if not locs:
+        return
+    keys = sorted({x["key"] for x in locs})
+    if len(dataset) == 0:
+        raise HTTPException(status_code=400, detail={"error": "用例包含变量占位符，但未配置数据集", "placeholders": keys, "locations": locs[:50]})
+
+    missing: List[Dict[str, Any]] = []
+    for row_idx, row in enumerate(dataset):
+        for k in keys:
+            if k not in row:
+                missing.append({"row": row_idx, "key": k})
+                if len(missing) >= 200:
+                    break
+        if len(missing) >= 200:
+            break
+    if missing:
+        raise HTTPException(status_code=400, detail={
+            "error": "数据集中缺少用例所需的变量",
+            "placeholders": keys,
+            "missing": missing,
+            "locations": locs[:50],
+        })
+
 @app.post("/api/cases")
 async def create_case(request: Request):
     data = await request.json()
     name = _safe_case_name(data.get("name") or f"case_{int(time.time())}")
     case_id = f"{name}.json"
+
+    _validate_case_placeholders_or_raise({
+        "start_url": data.get("start_url"),
+        "steps": data.get("steps", []),
+        "dataset": data.get("dataset", []),
+    })
     
     db = SessionLocal()
     try:
@@ -768,6 +890,15 @@ async def update_case(case_id: str, request: Request):
         c = db.query(CaseModel).filter_by(id=case_id).first()
         if not c:
             return JSONResponse({"error": "Case not found"}, status_code=404)
+
+        next_doc = _case_doc_from_model(c)
+        if "steps" in data:
+            next_doc["steps"] = data.get("steps", [])
+        if "dataset" in data:
+            next_doc["dataset"] = data.get("dataset", [])
+        if "start_url" in data:
+            next_doc["start_url"] = data.get("start_url")
+        _validate_case_placeholders_or_raise(next_doc)
         
         _write_case_backup_file(case_id, _case_doc_from_model(c))
         c.steps = json.dumps(data.get("steps", []))
@@ -958,7 +1089,9 @@ async def get_run_detail(run_id: str):
     if not os.path.exists(meta_path):
         return JSONResponse({"error": "Run not found"}, status_code=404)
     with open(meta_path, "r", encoding="utf-8") as f:
-        return JSONResponse(json.load(f))
+        meta = json.load(f)
+    meta = _migrate_run_meta(meta, meta_path)
+    return JSONResponse(meta)
 
 class RunFixSuggestReq(BaseModel):
     force: bool = False
@@ -970,6 +1103,7 @@ async def ai_fix_suggest(run_id: str, req: RunFixSuggestReq):
         return JSONResponse({"error": "Run not found"}, status_code=404)
     with open(meta_path, "r", encoding="utf-8") as f:
         run_meta = json.load(f)
+    run_meta = _migrate_run_meta(run_meta, meta_path)
     case_id = run_meta.get("case_id")
     if not case_id:
         return JSONResponse({"error": "Missing case_id"}, status_code=400)
@@ -1018,7 +1152,9 @@ async def get_suite_run_detail(suite_run_id: str):
     if not os.path.exists(meta_path):
         return JSONResponse({"error": "Suite run not found"}, status_code=404)
     with open(meta_path, "r", encoding="utf-8") as f:
-        return JSONResponse(json.load(f))
+        meta = json.load(f)
+    meta = _migrate_suite_run_meta(meta, meta_path)
+    return JSONResponse(meta)
 
 @app.delete("/api/suite_runs/{suite_run_id}")
 async def delete_suite_run(suite_run_id: str):
@@ -1317,6 +1453,7 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
                 if parsed_base.scheme and parsed_base.netloc:
                     case["start_url"] = parsed_su._replace(scheme=parsed_base.scheme, netloc=parsed_base.netloc).geturl()
                     
+        _validate_case_placeholders_or_raise(case)
         script_content = _build_python_script(case)
         os.makedirs(SCRIPTS_DIR, exist_ok=True)
         temp_file = tempfile.NamedTemporaryFile(dir=SCRIPTS_DIR, mode="w", suffix=".py", prefix="test_case_", delete=False, encoding="utf-8")
@@ -1334,12 +1471,14 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
     run_folder = _run_dir(run_id)
     os.makedirs(os.path.join(run_folder, "screenshots"), exist_ok=True)
     meta = {
+        "schema_version": 2,
         "id": run_id,
         "case_id": case_id or name,
         "status": "running",
         "started_at": int(time.time()),
         "ended_at": None,
         "duration_ms": None,
+        "failure_reason": None,
         "logs": [],
         "screenshots": [],
         "heal_events": [],
@@ -1352,6 +1491,24 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
     # 异步启动 pytest 进程
     asyncio.create_task(run_pytest_worker(session_id, resolved_script_path, temp_file.name if temp_file else None, wait_for_ws=wait_for_ws, extra_env=extra_env))
     return {"run_id": run_id, "session_id": session_id}
+
+def _infer_failure_reason(logs: List[str]) -> Dict[str, Any]:
+    tail = [str(x) for x in (logs or []) if x]
+    tail = tail[-120:]
+    patterns = [
+        ("data_binding", re.compile(r"NameError: name '.+' is not defined|is not defined", re.I)),
+        ("strict_mode", re.compile(r"strict mode violation", re.I)),
+        ("timeout", re.compile(r"Timeout(?:Error)?|timed out", re.I)),
+        ("selector_not_found", re.compile(r"No node found for selector|waiting for locator|locator\(.+\)\.click|locator\(.+\)\.fill", re.I)),
+        ("iframe", re.compile(r"frame was detached|target closed|Execution context was destroyed", re.I)),
+        ("assertion", re.compile(r"AssertionError|assert .* failed", re.I)),
+        ("navigation", re.compile(r"net::ERR|Navigation timeout|page\.goto", re.I)),
+    ]
+    for category, rx in patterns:
+        for line in reversed(tail):
+            if rx.search(line):
+                return {"category": category, "message": line}
+    return {"category": "unknown", "message": tail[-1] if tail else ""}
 
 async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Optional[str] = None, wait_for_ws: bool = True, extra_env: Optional[Dict[str, str]] = None):
     if wait_for_ws:
@@ -1439,6 +1596,8 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
             run_meta["ended_at"] = int(time.time())
             if run_meta.get("started_at"):
                 run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
+            if process.returncode != 0:
+                run_meta["failure_reason"] = _infer_failure_reason(run_meta.get("logs") or [])
             try:
                 token_path = os.path.join(_run_dir(session_id), "token_usage.json")
                 if os.path.exists(token_path):
@@ -1463,6 +1622,7 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
             if run_meta.get("started_at"):
                 run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
             run_meta["logs"].append(f"❌ 执行异常: {str(e)}")
+            run_meta["failure_reason"] = {"category": "exception", "message": str(e)}
             try:
                 token_path = os.path.join(_run_dir(session_id), "token_usage.json")
                 if os.path.exists(token_path):
