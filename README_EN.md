@@ -166,7 +166,7 @@ You can also configure these in the Web Console Settings page (the server will w
 
 ### Case JSON
 
-Cases are stored at `tests/recorded_cases/*.json` by default:
+Cases are persisted in SQLite (`tests/tester.db`). Before each update/rename, the server writes a backup to `tests/recorded_cases/<case_id>.json.bak`, and you can rollback via `/api/cases/{case_id}/restore`:
 
 ```json
 {
@@ -205,7 +205,7 @@ Suites are stored at `tests/suites/*.json`:
 ## 💾 Data Directory & Ignore Rules (Important)
 
 `tests/` is a runtime data directory and is not committed by default:
-- `tests/recorded_cases/`: case library (often company/internal)
+- `tests/recorded_cases/`: case backups (`*.json.bak`)
 - `tests/run_history/`: run artifacts (meta.json, screenshots, token_usage.json)
 - `tests/suite_history/`: suite run artifacts (meta.json, storage_state.json)
 
@@ -276,6 +276,7 @@ Backend listens on `http://127.0.0.1:8000`.
 | Cases | PUT | `/api/cases/{case_id}` | Update case |
 | Cases | DELETE | `/api/cases/{case_id}` | Delete case |
 | Cases | POST | `/api/cases/{case_id}/rename` | Rename case |
+| Cases | POST | `/api/cases/{case_id}/restore` | Roll back to previous version from `tests/recorded_cases/<case_id>.json.bak` |
 | NL2Case | POST | `/api/cases/generate` | Generate steps (returns token_usage) |
 | Heal | POST | `/api/cases/{case_id}/heal/approve` | Approve rewrite (supports empty old_selector by intent) |
 | Script | GET | `/api/cases/{case_id}/script` | Get generated pytest script |

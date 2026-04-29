@@ -142,7 +142,7 @@ npm run dev
 
 ### 用例 JSON（Case）
 
-用例默认保存在 `tests/recorded_cases/*.json`。基本结构：
+用例在控制台中会持久化到 SQLite（`tests/tester.db`）。每次更新/重命名前，系统会将上一版用例写入 `tests/recorded_cases/<case_id>.json.bak` 作为备份；可通过 `/api/cases/{case_id}/restore` 进行回滚恢复。基本结构：
 
 ```json
 {
@@ -184,7 +184,7 @@ npm run dev
 ## 💾 数据目录与忽略规则（很重要）
 
 `tests/` 是运行时数据目录，通常包含业务用例与运行产物，默认不会提交到仓库：
-- `tests/recorded_cases/`：用例库（建议仅在公司内部仓库存放）
+- `tests/recorded_cases/`：用例备份库（`*.json.bak`）
 - `tests/run_history/`：单次运行产物（meta.json、screenshots、token_usage.json）
 - `tests/suite_history/`：套件运行产物（meta.json、storage_state.json）
 
@@ -217,7 +217,7 @@ npm run dev
 
 - **步骤编辑**：维护 `type/selector/intent/value/assert_type` 等字段
 - **脚本视图**：查看后端动态生成的 pytest 脚本（用于排错与 CI 集成）
-- **保存/回滚**：保存用例 JSON 到本地数据目录（`tests/recorded_cases/`）
+- **保存/回滚**：保存用例到 SQLite（`tests/tester.db`）；更新前自动写入 `tests/recorded_cases/<case_id>.json.bak` 备份并支持一键回滚
 
 ### 运行与实时监控
 
@@ -258,12 +258,13 @@ npm run dev
 | 配置 | POST | `/api/config/test` | 测试模型连通性（返回延迟与 token_usage） |
 | 环境 | GET | `/api/environments` | 获取环境列表（base_url） |
 | 环境 | POST | `/api/environments` | 保存环境列表 |
-| 用例 | GET | `/api/cases` | 列出用例（`tests/recorded_cases/`） |
+| 用例 | GET | `/api/cases` | 列出用例（SQLite：`tests/tester.db`） |
 | 用例 | POST | `/api/cases` | 新建用例 |
 | 用例 | GET | `/api/cases/{case_id}` | 获取用例详情 |
 | 用例 | PUT | `/api/cases/{case_id}` | 更新用例 |
 | 用例 | DELETE | `/api/cases/{case_id}` | 删除用例 |
 | 用例 | POST | `/api/cases/{case_id}/rename` | 重命名用例 |
+| 用例 | POST | `/api/cases/{case_id}/restore` | 从 `tests/recorded_cases/<case_id>.json.bak` 回滚到上一个版本 |
 | 用例 | POST | `/api/cases/generate` | NL2Case：自然语言生成 steps（返回 token_usage） |
 | 自愈 | POST | `/api/cases/{case_id}/heal/approve` | 审计通过后写回 selector（支持 old_selector 为空时按 intent 定位步骤） |
 | 脚本 | GET | `/api/cases/{case_id}/script` | 查看动态生成的 pytest 脚本 |
@@ -337,8 +338,8 @@ OPENAI_MODEL_NAME=gpt-4o-mini
 ## 🏃 命令行 / CI 运行建议
 
 控制台运行本质上是“动态生成 pytest 脚本并执行”。如果你要在 CI 里跑，建议采用：
-- 由控制台维护用例 JSON（公司内部仓库/私有目录）
-- 在 CI 里拉取代码 + 注入 `.env` + 提供 `tests/recorded_cases/` 数据目录
+- 由控制台维护用例/套件数据（SQLite：`tests/tester.db`）
+- 在 CI 里拉取代码 + 注入 `.env` + 提供 `tests/tester.db`；如需回滚能力可同时挂载 `tests/recorded_cases/` 备份目录
 
 核心命令：
 
@@ -355,8 +356,6 @@ curl -X POST "http://127.0.0.1:8000/api/suites/<suite_id>/run"
 ```
 
 ### 1) 运行时报 Playwright 浏览器未安装
-
-```bash
 
 ```bash
 playwright install chromium
