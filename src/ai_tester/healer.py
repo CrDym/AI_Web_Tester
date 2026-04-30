@@ -107,10 +107,14 @@ class SelfHealer:
             if not session_id:
                 return
             import urllib.request
+            internal_token = os.environ.get("AI_TESTER_INTERNAL_TOKEN")
+            headers = {"Content-Type": "application/json"}
+            if internal_token:
+                headers["X-Internal-Token"] = internal_token
             req = urllib.request.Request(
                 f"http://127.0.0.1:{port}/api/internal/push_heal_event/{session_id}",
                 data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+                headers=headers,
             )
             urllib.request.urlopen(req, timeout=1)
         except Exception:

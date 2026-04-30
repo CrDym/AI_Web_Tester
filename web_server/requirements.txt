@@ -5,3 +5,7 @@ websockets
 pytest
 pytest-playwright
 python-dotenv
+sqlalchemy
+langchain-openai
+pillow
+langchain

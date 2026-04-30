@@ -100,6 +100,15 @@ class SuiteRunModel(Base):
     duration_ms = Column(Integer)
     case_runs = Column(Text) # JSON dict
 
+class UserModel(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    salt = Column(String, nullable=False)
+    created_at = Column(Integer)
+    last_login_at = Column(Integer)
+
 Base.metadata.create_all(bind=engine)
 migrate_schema()
 

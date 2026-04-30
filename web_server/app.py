@@ -6,13 +6,20 @@ import uuid
 import tempfile
 import base64
 import re
+import hashlib
+import hmac
+import secrets
+import sys
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 import os
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from web_server.database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel
+try:
+    from web_server.database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel, UserModel
+except Exception:
+    from database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel, UserModel
 
 worker_semaphore = asyncio.Semaphore(3) # 最大并发数为 3
 from langchain_openai import ChatOpenAI
@@ -29,6 +36,128 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+AUTH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
+INTERNAL_TOKEN = secrets.token_urlsafe(32)
+active_tokens: Dict[str, Dict[str, Any]] = {}
+
+def _now_ts() -> int:
+    return int(time.time())
+
+def _hash_password(password: str, salt: str) -> str:
+    dk = hashlib.pbkdf2_hmac(
+        "sha256",
+        (password or "").encode("utf-8"),
+        (salt or "").encode("utf-8"),
+        120000,
+    )
+    return dk.hex()
+
+def _is_valid_token(token: str) -> bool:
+    tok = (token or "").strip()
+    if not tok:
+        return False
+    rec = active_tokens.get(tok)
+    if not rec:
+        return False
+    exp = int(rec.get("exp") or 0)
+    if exp and _now_ts() >= exp:
+        try:
+            del active_tokens[tok]
+        except Exception:
+            pass
+        return False
+    return True
+
+def _extract_bearer_token(auth_header: str) -> str:
+    raw = (auth_header or "").strip()
+    if not raw:
+        return ""
+    if raw.lower().startswith("bearer "):
+        return raw[7:].strip()
+    return ""
+
+@app.middleware("http")
+async def _auth_middleware(request: Request, call_next):
+    path = request.url.path or ""
+    if not path.startswith("/api"):
+        return await call_next(request)
+    if path.startswith("/api/auth/"):
+        return await call_next(request)
+    if path.startswith("/api/internal/"):
+        token = (request.headers.get("X-Internal-Token") or "").strip()
+        if token != INTERNAL_TOKEN:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await call_next(request)
+    token = _extract_bearer_token(request.headers.get("Authorization") or "")
+    if not _is_valid_token(token):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+class AuthSetupReq(BaseModel):
+    username: str
+    password: str
+
+class AuthLoginReq(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/auth/setup")
+async def auth_setup(req: AuthSetupReq):
+    username = (req.username or "").strip()
+    password = str(req.password or "")
+    if not username or not password:
+        return JSONResponse({"error": "Missing parameters"}, status_code=400)
+    db = SessionLocal()
+    try:
+        if db.query(UserModel).count() > 0:
+            return JSONResponse({"error": "Already initialized"}, status_code=409)
+        if db.query(UserModel).filter_by(username=username).first():
+            return JSONResponse({"error": "User already exists"}, status_code=409)
+        salt = secrets.token_hex(16)
+        password_hash = _hash_password(password, salt)
+        u = UserModel(
+            username=username,
+            password_hash=password_hash,
+            salt=salt,
+            created_at=_now_ts(),
+            last_login_at=None,
+        )
+        db.add(u)
+        db.commit()
+        return JSONResponse({"status": "success"})
+    finally:
+        db.close()
+
+@app.post("/api/auth/login")
+async def auth_login(req: AuthLoginReq):
+    username = (req.username or "").strip()
+    password = str(req.password or "")
+    if not username or not password:
+        return JSONResponse({"error": "Missing parameters"}, status_code=400)
+    db = SessionLocal()
+    try:
+        u = db.query(UserModel).filter_by(username=username).first()
+        if not u:
+            return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+        expected = _hash_password(password, getattr(u, "salt", "") or "")
+        if not hmac.compare_digest(expected, getattr(u, "password_hash", "") or ""):
+            return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+        u.last_login_at = _now_ts()
+        db.commit()
+        token = secrets.token_urlsafe(32)
+        active_tokens[token] = {"username": username, "exp": _now_ts() + AUTH_TOKEN_TTL_SECONDS}
+        return JSONResponse({"status": "success", "token": token, "username": username})
+    finally:
+        db.close()
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    token = _extract_bearer_token(request.headers.get("Authorization") or "")
+    if not _is_valid_token(token):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    rec = active_tokens.get(token) or {}
+    return JSONResponse({"status": "success", "username": rec.get("username")})
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "tests", "recorded_scripts")
@@ -1142,6 +1271,26 @@ async def delete_run(run_id: str):
     shutil.rmtree(d, ignore_errors=True)
     return JSONResponse({"status": "success"})
 
+class BatchDeleteRunsReq(BaseModel):
+    run_ids: List[str]
+
+@app.post("/api/runs/batch_delete")
+async def batch_delete_runs(req: BatchDeleteRunsReq):
+    run_ids = [str(x).strip() for x in (req.run_ids or []) if str(x or "").strip()]
+    if not run_ids:
+        return JSONResponse({"error": "Missing run_ids"}, status_code=400)
+    import shutil
+    deleted: List[str] = []
+    not_found: List[str] = []
+    for run_id in run_ids:
+        d = _run_dir(run_id)
+        if not os.path.exists(d):
+            not_found.append(run_id)
+            continue
+        shutil.rmtree(d, ignore_errors=True)
+        deleted.append(run_id)
+    return JSONResponse({"status": "success", "deleted": deleted, "not_found": not_found})
+
 @app.get("/api/suite_runs")
 async def get_suite_runs(suite_id: Optional[str] = None):
     return JSONResponse(_list_suite_runs(suite_id=suite_id))
@@ -1529,6 +1678,7 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
     env["PLAYWRIGHT_HEADLESS"] = "1"
     env["AI_TESTER_WS_SESSION"] = session_id
     env["AI_TESTER_WS_PORT"] = "8000"
+    env["AI_TESTER_INTERNAL_TOKEN"] = INTERNAL_TOKEN
     env["AI_TESTER_RUN_HISTORY_DIR"] = _run_dir(session_id)
     env["PYTHONPATH"] = os.pathsep.join(
         [os.path.join(PROJECT_ROOT, "src"), env.get("PYTHONPATH", "")]
@@ -1548,8 +1698,13 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
     run_meta = active_runs.get(session_id)
     
     try:
+        venv_python = os.path.join(PROJECT_ROOT, "venv", "bin", "python3")
+        python_exec = venv_python if os.path.exists(venv_python) else sys.executable
+        venv_bin = os.path.dirname(venv_python)
+        if os.path.exists(venv_bin):
+            env["PATH"] = os.pathsep.join([venv_bin, env.get("PATH", "")]).strip(os.pathsep)
         process = await asyncio.create_subprocess_exec(
-            "pytest", "-q", "-s", "--tb=short", "--disable-warnings", "-p", "ai_tester.pytest_fixtures", script_path,
+            python_exec, "-m", "pytest", "-q", "-s", "--tb=short", "--disable-warnings", "-p", "ai_tester.pytest_fixtures", script_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=env,
@@ -1650,6 +1805,10 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
 
 @app.websocket("/ws/run/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    token = (websocket.query_params.get("token") or "").strip()
+    if not _is_valid_token(token):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     active_sessions[session_id] = websocket
     try:

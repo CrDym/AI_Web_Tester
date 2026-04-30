@@ -385,10 +385,14 @@ class PlaywrightDriver:
             try:
                 import urllib.request
                 import json
+                internal_token = os.environ.get("AI_TESTER_INTERNAL_TOKEN")
+                headers = {"Content-Type": "application/json"}
+                if internal_token:
+                    headers["X-Internal-Token"] = internal_token
                 req = urllib.request.Request(
                     f"http://127.0.0.1:{ws_port}/api/internal/push_screenshot/{ws_session}",
                     data=json.dumps({"image": b64_str}).encode("utf-8"),
-                    headers={"Content-Type": "application/json"}
+                    headers=headers
                 )
                 urllib.request.urlopen(req, timeout=1)
             except Exception:
@@ -462,10 +466,14 @@ class PlaywrightDriver:
                 try:
                     import urllib.request
                     import json
+                    internal_token = os.environ.get("AI_TESTER_INTERNAL_TOKEN")
+                    headers = {"Content-Type": "application/json"}
+                    if internal_token:
+                        headers["X-Internal-Token"] = internal_token
                     req = urllib.request.Request(
                         f"http://127.0.0.1:{ws_port}/api/internal/push_screenshot/{ws_session}",
                         data=json.dumps({"image": final_b64}).encode("utf-8"),
-                        headers={"Content-Type": "application/json"}
+                        headers=headers
                     )
                     urllib.request.urlopen(req, timeout=1)
                 except Exception:

@@ -72,19 +72,19 @@ export default function DatasetEditor({ dataset, onChange }: Props) {
     <div className="space-y-4 h-full flex flex-col">
       <div className="flex items-start justify-between">
         <div className="flex flex-col gap-1">
-          <span className="text-[13px] font-bold tracking-widest text-[#f4f4f5] uppercase">绑定数据集 (JSON Array)</span>
+          <span className="text-[13px] font-semibold tracking-wide text-zinc-900">绑定数据集</span>
           <span className="text-[11px] text-zinc-500 max-w-xl leading-relaxed">
-            运行时会自动使用 <code className="text-[#00e5ff] px-1 bg-[#00e5ff]/10 rounded">{'${变量名}'}</code> 替换用例中的内容。如果数组为空或未配置，则仅运行一次。
+            运行时会自动使用 <code className="text-[#0e8a6a] px-1 bg-[#10a37f]/10 rounded">{'${变量名}'}</code> 替换用例中的内容。如果数组为空或未配置，则仅运行一次。
           </span>
         </div>
-        <label className="shrink-0 cursor-pointer bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20 text-[#00e5ff] border border-[#00e5ff]/30 px-4 py-2 rounded text-[11px] font-bold tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(0,229,255,0.05)] hover:shadow-[0_0_15px_rgba(0,229,255,0.2)]">
+        <label className="shrink-0 cursor-pointer bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 px-4 py-2 rounded-xl text-[11px] font-semibold transition-all">
           导入 JSON / CSV 文件
           <input type="file" accept=".json,.csv" className="hidden" onChange={handleFileChange} />
         </label>
       </div>
       {error && <div className="text-xs text-rose-500">{error}</div>}
       <textarea
-        className="flex-1 w-full bg-[#0a0e17]/80 backdrop-blur-xl border border-[#00e5ff]/20 rounded-xl p-4 text-[13px] text-[#00e5ff] font-mono focus:outline-none focus:border-[#00e5ff]/50 focus:shadow-[0_0_20px_rgba(0,229,255,0.1)] transition-all custom-scrollbar leading-relaxed"
+        className="flex-1 w-full bg-white border border-zinc-200 rounded-xl p-4 text-[13px] text-zinc-900 font-mono focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all custom-scrollbar leading-relaxed"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={handleBlur}
@@ -93,4 +93,3 @@ export default function DatasetEditor({ dataset, onChange }: Props) {
     </div>
   );
 }
-
