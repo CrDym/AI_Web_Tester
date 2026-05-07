@@ -84,6 +84,8 @@ async def _auth_middleware(request: Request, call_next):
         return await call_next(request)
     if path.startswith("/api/auth/"):
         return await call_next(request)
+    if path == "/api/recorder/cases":
+        return await call_next(request)
     if path.startswith("/api/internal/"):
         token = (request.headers.get("X-Internal-Token") or "").strip()
         if token != INTERNAL_TOKEN:
@@ -209,6 +211,7 @@ def _case_doc_from_model(c: CaseModel) -> Dict[str, Any]:
         "start_url": getattr(c, "start_url", None),
         "steps": json.loads(c.steps) if c.steps else [],
         "tags": json.loads(c.tags) if getattr(c, "tags", None) else [],
+        "variables": json.loads(c.variables) if getattr(c, "variables", None) else {},
         "dataset": json.loads(c.dataset) if getattr(c, "dataset", None) else [],
         "created_at": getattr(c, "created_at", None),
         "updated_at": getattr(c, "updated_at", None),
@@ -531,15 +534,19 @@ def _make_ai_fix_suggestion(run_meta: Dict[str, Any], case_doc: Dict[str, Any], 
 def _build_python_script(case: Dict[str, Any]) -> str:
     start_url = case.get("start_url")
     steps = case.get("steps") or []
+    variables = case.get("variables") or {}
     dataset = case.get("dataset") or []
-    if not dataset:
-        dataset = [{}]
+    if dataset:
+        dataset = [{**variables, **row} for row in dataset]
+    else:
+        dataset = [variables]
 
     lines: List[str] = []
     lines.append("import os")
     lines.append("import re")
     lines.append("import sys")
     lines.append("import json")
+    lines.append("from datetime import datetime")
     lines.append("import pytest")
     lines.append("from dotenv import load_dotenv")
     lines.append("")
@@ -555,6 +562,13 @@ def _build_python_script(case: Dict[str, Any]) -> str:
     lines.append("    driver = PlaywrightDriver(page)")
     lines.append("    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)")
     lines.append("    healer = SelfHealer(use_vision=True) if os.environ.get('OPENAI_API_KEY') else None")
+    lines.append("")
+    lines.append("    runtime_vars = {")
+    lines.append("        'today_ymd': datetime.now().strftime('%y%m%d'),")
+    lines.append("        'today_yyyyMMdd': datetime.now().strftime('%Y%m%d'),")
+    lines.append("        'today_mmdd': datetime.now().strftime('%m%d'),")
+    lines.append("    }")
+    lines.append("    dataset_row = {**runtime_vars, **dataset_row}")
     lines.append("")
     lines.append("    def _replace_vars(text):")
     lines.append("        if not isinstance(text, str): return text")
@@ -602,7 +616,7 @@ def _build_python_script(case: Dict[str, Any]) -> str:
         display_intent = intent if intent else "无意图"
         lines.append(f"    action_type_{idx} = {json.dumps(stype)}")
         lines.append(f"    action_show_{idx} = action_type_{idx}")
-        lines.append(f"    if action_type_{idx} in ['input','wait','assert','hover','select_option','press_key','scroll'] and step_value_{idx}:")
+        lines.append(f"    if action_type_{idx} in ['input','wait','assert','hover','select_option','set_checked','press_key','scroll'] and step_value_{idx}:")
         lines.append(f"        action_show_{idx} = action_show_{idx} + f\"({{step_value_{idx}}})\"")
 
         lines.append(f"    print(f\"\\n▶️  [Step {idx+1}] 🎯 元素：'{{selector_{idx}}}' (意图: {display_intent})，动作：{{action_show_{idx}}}\", flush=True)")
@@ -624,7 +638,7 @@ def _build_python_script(case: Dict[str, Any]) -> str:
                 lines.append(f"        assert step_value_{idx} in current_page.url, f'断言失败: URL 不包含 \"{{step_value_{idx}}}\"'")
             elif assert_type == "visible":
                 lines.append(f"        driver._get_locator(selector_{idx}).wait_for(state='visible', timeout=3000)")
-        elif stype in ["hover", "select_option", "double_click", "right_click", "press_key", "scroll", "click"]:
+        elif stype in ["hover", "select_option", "set_checked", "double_click", "right_click", "press_key", "scroll", "click"]:
             lines.append(f"        driver.perform_action(\"{stype}\", f\"SELECTOR:{{selector_{idx}}}\", step_value_{idx})")
         else:
             lines.append(f"        driver.perform_action(\"click\", f\"SELECTOR:{{selector_{idx}}}\")")
@@ -654,7 +668,7 @@ def _build_python_script(case: Dict[str, Any]) -> str:
         elif stype == "assert" and step.get("assert_type") == "visible":
             lines.append("                new_sel = new_id.replace('SELECTOR:', '') if str(new_id).startswith('SELECTOR:') else f'[ai-id=\"{new_id}\"]'")
             lines.append("                driver.page.wait_for_selector(new_sel, state='visible', timeout=3000)")
-        elif stype in ["hover", "select_option", "double_click", "right_click", "press_key", "scroll", "click"]:
+        elif stype in ["hover", "select_option", "set_checked", "double_click", "right_click", "press_key", "scroll", "click"]:
             lines.append(f"                driver.perform_action(\"{stype}\", new_id, step_value_{idx})")
         else:
             lines.append("                driver.perform_action(\"click\", new_id)")
@@ -757,6 +771,8 @@ async def generate_case(req: GenerateCaseReq):
                 start_url=req.start_url,
                 steps=json.dumps(data.get("steps", [])),
                 tags=json.dumps(["auto_generated"]),
+                variables=json.dumps({}),
+                dataset=json.dumps([]),
                 created_at=int(time.time()),
                 updated_at=int(time.time())
             )
@@ -899,6 +915,7 @@ async def delete_suite(suite_id: str):
     return JSONResponse({"status": "success"})
 
 _PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+_BUILTIN_PLACEHOLDERS = {"today_ymd", "today_yyyyMMdd", "today_mmdd"}
 
 def _extract_placeholders(val: Any) -> List[str]:
     if not isinstance(val, str) or "${" not in val:
@@ -925,6 +942,12 @@ def _collect_case_placeholders(case_doc: Dict[str, Any]) -> List[Dict[str, Any]]
     return locs
 
 def _validate_case_placeholders_or_raise(case_doc: Dict[str, Any]) -> None:
+    variables = case_doc.get("variables") or {}
+    if variables is None:
+        variables = {}
+    if not isinstance(variables, dict):
+        raise HTTPException(status_code=400, detail={"error": "variables 必须是 JSON 对象"})
+
     dataset = case_doc.get("dataset") or []
     if dataset is None:
         dataset = []
@@ -937,19 +960,24 @@ def _validate_case_placeholders_or_raise(case_doc: Dict[str, Any]) -> None:
     locs = _collect_case_placeholders(case_doc)
     if not locs:
         return
-    keys = sorted({x["key"] for x in locs})
-    if len(dataset) == 0:
-        raise HTTPException(status_code=400, detail={"error": "用例包含变量占位符，但未配置数据集", "placeholders": keys, "locations": locs[:50]})
-
+    keys = sorted({x["key"] for x in locs if x["key"] not in _BUILTIN_PLACEHOLDERS})
+    if not keys:
+        return
     missing: List[Dict[str, Any]] = []
-    for row_idx, row in enumerate(dataset):
+    if len(dataset) == 0:
         for k in keys:
-            if k not in row:
-                missing.append({"row": row_idx, "key": k})
-                if len(missing) >= 200:
-                    break
-        if len(missing) >= 200:
-            break
+            if k not in variables:
+                missing.append({"key": k})
+    else:
+        for row_idx, row in enumerate(dataset):
+            merged = {**variables, **row}
+            for k in keys:
+                if k not in merged:
+                    missing.append({"row": row_idx, "key": k})
+                    if len(missing) >= 200:
+                        break
+            if len(missing) >= 200:
+                break
     if missing:
         raise HTTPException(status_code=400, detail={
             "error": "数据集中缺少用例所需的变量",
@@ -958,39 +986,53 @@ def _validate_case_placeholders_or_raise(case_doc: Dict[str, Any]) -> None:
             "locations": locs[:50],
         })
 
-@app.post("/api/cases")
-async def create_case(request: Request):
-    data = await request.json()
+def _create_case_from_payload(data: Dict[str, Any]) -> JSONResponse:
     name = _safe_case_name(data.get("name") or f"case_{int(time.time())}")
     case_id = f"{name}.json"
 
     _validate_case_placeholders_or_raise({
         "start_url": data.get("start_url"),
         "steps": data.get("steps", []),
+        "variables": data.get("variables", {}),
         "dataset": data.get("dataset", []),
     })
-    
+
     db = SessionLocal()
     try:
-        if db.query(CaseModel).filter_by(id=case_id).first():
-            return JSONResponse({"error": "Case already exists"}, status_code=400)
-            
+        final_case_id = case_id
+        final_name = name
+        if db.query(CaseModel).filter_by(id=final_case_id).first():
+            suffix = int(time.time() * 1000)
+            final_name = f"{name}_{suffix}"
+            final_case_id = f"{final_name}.json"
+
         new_case = CaseModel(
-            id=case_id,
-            name=name,
+            id=final_case_id,
+            name=final_name,
             type="json",
             start_url=data.get("start_url"),
             steps=json.dumps(data.get("steps", [])),
             tags=json.dumps(data.get("tags", [])),
+            variables=json.dumps(data.get("variables", {})),
             dataset=json.dumps(data.get("dataset", [])),
             created_at=int(time.time()),
             updated_at=int(time.time())
         )
         db.add(new_case)
         db.commit()
-        return JSONResponse({"status": "success", "id": case_id})
+        return JSONResponse({"status": "success", "id": final_case_id})
     finally:
         db.close()
+
+@app.post("/api/recorder/cases")
+async def create_case_from_recorder(request: Request):
+    data = await request.json()
+    return _create_case_from_payload(data)
+
+@app.post("/api/cases")
+async def create_case(request: Request):
+    data = await request.json()
+    return _create_case_from_payload(data)
 @app.get("/api/cases/{case_id}")
 async def get_case(case_id: str):
     db = SessionLocal()
@@ -1005,6 +1047,7 @@ async def get_case(case_id: str):
             "start_url": getattr(c, "start_url", None),
             "steps": json.loads(c.steps) if c.steps else [],
             "tags": json.loads(c.tags) if c.tags else [],
+            "variables": json.loads(c.variables) if getattr(c, "variables", None) else {},
             "dataset": json.loads(c.dataset) if getattr(c, "dataset", None) else [],
             "created_at": c.created_at,
             "updated_at": c.updated_at
@@ -1023,6 +1066,8 @@ async def update_case(case_id: str, request: Request):
         next_doc = _case_doc_from_model(c)
         if "steps" in data:
             next_doc["steps"] = data.get("steps", [])
+        if "variables" in data:
+            next_doc["variables"] = data.get("variables", {})
         if "dataset" in data:
             next_doc["dataset"] = data.get("dataset", [])
         if "start_url" in data:
@@ -1033,6 +1078,8 @@ async def update_case(case_id: str, request: Request):
         c.steps = json.dumps(data.get("steps", []))
         if "tags" in data:
             c.tags = json.dumps(data.get("tags", []))
+        if "variables" in data:
+            c.variables = json.dumps(data.get("variables", {}))
         if "dataset" in data:
             c.dataset = json.dumps(data.get("dataset", []))
         if "name" in data:
@@ -1201,6 +1248,7 @@ async def get_case_script(case_id: str):
             "name": case_model.name,
             "start_url": case_model.start_url,
             "steps": json.loads(case_model.steps) if case_model.steps else [],
+            "variables": json.loads(case_model.variables) if getattr(case_model, "variables", None) else {},
             "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
             "type": case_model.type
         }
@@ -1247,6 +1295,7 @@ async def ai_fix_suggest(run_id: str, req: RunFixSuggestReq):
             "name": case_model.name,
             "start_url": case_model.start_url,
             "steps": json.loads(case_model.steps) if case_model.steps else [],
+            "variables": json.loads(case_model.variables) if getattr(case_model, "variables", None) else {},
             "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
             "type": case_model.type
         }
@@ -1567,6 +1616,7 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
                 "name": case_model.name,
                 "start_url": case_model.start_url,
                 "steps": json.loads(case_model.steps) if case_model.steps else [],
+                "variables": json.loads(case_model.variables) if getattr(case_model, "variables", None) else {},
                 "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
                 "type": case_model.type
             }

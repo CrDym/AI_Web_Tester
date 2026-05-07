@@ -31,6 +31,7 @@ def migrate_schema() -> None:
         _ensure_columns("cases", {
             "description": "VARCHAR",
             "dataset": "TEXT",
+            "variables": "TEXT",
         })
         _ensure_columns("suites", {
             "description": "VARCHAR",
@@ -61,6 +62,7 @@ class CaseModel(Base):
     steps = Column(Text) # JSON list
     tags = Column(Text) # JSON list
     dataset = Column(Text) # JSON list
+    variables = Column(Text) # JSON dict
     created_at = Column(Integer)
     updated_at = Column(Integer)
 

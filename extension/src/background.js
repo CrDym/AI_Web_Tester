@@ -32,7 +32,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // 简单的防抖去重：如果最后一个动作和当前动作相同，则合并（例如连续触发 input/change）
             if (recordedActions.length > 0) {
                 const lastAction = recordedActions[recordedActions.length - 1];
-                if (lastAction.type === "input" && request.action.type === "input" && lastAction.selector === request.action.selector) {
+                if (
+                    ["input", "select_option", "set_checked"].includes(lastAction.type) &&
+                    lastAction.type === request.action.type &&
+                    lastAction.selector === request.action.selector
+                ) {
                     lastAction.value = request.action.value; // 更新最后输入的值
                     broadcastStatus();
                     sendResponse({ status: "action_updated" });

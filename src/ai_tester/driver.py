@@ -48,6 +48,7 @@ class PlaywrightDriver:
             "type": self._action_type,
             "hover": self._action_hover,
             "select_option": self._action_select_option,
+            "set_checked": self._action_set_checked,
             "drag_and_drop": self._action_drag_and_drop,
             "press_key": self._action_press_key,
             "scroll": self._action_scroll,
@@ -290,6 +291,15 @@ class PlaywrightDriver:
     def _action_select_option(self, locator, value, force=False):
         locator.select_option(value, force=force)
 
+    def _action_set_checked(self, locator, value, force=False):
+        v = value
+        if isinstance(v, str):
+            v = v.strip().lower()
+            checked = v in ["1", "true", "yes", "y", "on"]
+        else:
+            checked = bool(v)
+        locator.set_checked(checked, force=force, timeout=3000)
+
     def _action_drag_and_drop(self, locator, value, force=False):
         # value 是目标元素的 ai-id
         target_selector = f"[ai-id='{value}']"
@@ -337,7 +347,11 @@ class PlaywrightDriver:
             self.page.wait_for_timeout(500)
 
     def _action_wait(self, locator, value):
-        self.page.wait_for_timeout(1000)
+        try:
+            ms = int(value) if str(value).isdigit() else 1000
+        except Exception:
+            ms = 1000
+        self.page.wait_for_timeout(ms)
 
     def _action_done(self, locator, value):
         pass

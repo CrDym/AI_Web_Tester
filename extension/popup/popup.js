@@ -1,121 +1,177 @@
 // extension/popup/popup.js
 document.addEventListener('DOMContentLoaded', () => {
+    const CONSOLE_URL = 'http://127.0.0.1:5173/';
+    const API_BASE = 'http://127.0.0.1:8000';
+
+    const themePill = document.getElementById('theme-pill');
+    function applyTheme() {
+        try {
+            const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.body.classList.toggle('dark', !!isDark);
+            if (themePill) themePill.textContent = isDark ? '深色' : '浅色';
+        } catch (e) {}
+    }
+    try {
+        if (window.matchMedia) {
+            const m = window.matchMedia('(prefers-color-scheme: dark)');
+            if (m && m.addEventListener) m.addEventListener('change', applyTheme);
+        }
+    } catch (e) {}
+    applyTheme();
+
     const startBtn = document.getElementById('start-btn');
     const stopBtn = document.getElementById('stop-btn');
     const clearBtn = document.getElementById('clear-btn');
     const statusText = document.getElementById('status-text');
     const statusDot = document.getElementById('status-dot');
     const actionCount = document.getElementById('action-count');
+    const syncStatus = document.getElementById('sync-status');
+    const openConsoleBtn = document.getElementById('open-console-btn');
+
+    let isSyncing = false;
+    let lastSyncedCaseId = null;
+
+    function setSyncStatus(message, type) {
+        if (!syncStatus) return;
+        syncStatus.textContent = message || '';
+        syncStatus.className = type ? `sync-status ${type}` : 'sync-status';
+    }
+
+    function setControlsDisabled(disabled) {
+        startBtn.disabled = disabled;
+        stopBtn.disabled = disabled;
+        clearBtn.disabled = disabled;
+    }
 
     function updateUI() {
-        chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
+        chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (res) => {
+            if (isSyncing) {
+                statusText.textContent = '正在同步...';
+                statusText.className = 'syncing';
+                statusDot.className = 'dot syncing';
+                setControlsDisabled(true);
+                return;
+            }
+
             if (res && res.isRecording) {
-                statusText.textContent = "录制中...";
-                statusText.className = "recording";
-                statusDot.className = "dot recording";
+                statusText.textContent = '录制中...';
+                statusText.className = 'recording';
+                statusDot.className = 'dot recording';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
+                clearBtn.disabled = true;
             } else {
-                statusText.textContent = "系统就绪";
-                statusText.className = "";
-                statusDot.className = "dot";
+                statusText.textContent = '系统就绪';
+                statusText.className = '';
+                statusDot.className = 'dot';
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
+                clearBtn.disabled = false;
             }
             actionCount.textContent = res ? res.actionCount : 0;
         });
     }
 
+    function downloadRecordedCase(payload) {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${payload.name}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function getServerErrorMessage(response) {
+        try {
+            const data = await response.json();
+            if (typeof data?.detail === 'string') return data.detail;
+            if (data?.detail?.error) return data.detail.error;
+            if (data?.error) return data.error;
+            return JSON.stringify(data);
+        } catch (e) {
+            return `HTTP ${response.status}`;
+        }
+    }
+
+    async function syncRecordedCase(actions) {
+        if (!actions || actions.length === 0) {
+            setSyncStatus('没有录制到任何动作。', 'error');
+            alert('没有录制到任何动作。');
+            return;
+        }
+
+        const defaultFileName = `case_${new Date().getTime()}`;
+        const payload = {
+            name: defaultFileName,
+            start_url: actions[0] && actions[0].url ? actions[0].url : null,
+            steps: actions,
+            variables: {},
+            dataset: [],
+            type: 'json'
+        };
+
+        isSyncing = true;
+        setSyncStatus('正在同步到本地控制台...', 'syncing');
+        updateUI();
+
+        try {
+            const response = await fetch(`${API_BASE}/api/recorder/cases`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const serverMessage = await getServerErrorMessage(response);
+                throw new Error(serverMessage || `HTTP ${response.status}`);
+            }
+
+            const data = await response.json().catch(() => ({}));
+            lastSyncedCaseId = data.id || null;
+            setSyncStatus(`同步成功：${lastSyncedCaseId || defaultFileName}。控制台页面刷新后可见。`, 'success');
+            chrome.tabs.create({ url: CONSOLE_URL });
+        } catch (e) {
+            console.error('同步失败，降级为下载文件', e);
+            downloadRecordedCase(payload);
+            const message = e instanceof Error ? e.message : String(e);
+            setSyncStatus(`同步失败，已下载 JSON。原因：${message}`, 'error');
+            alert(`同步失败，已自动下载 JSON 文件。\n\n常见原因：本地后端未启动、端口不是 8000、或用例字段校验失败。\n\n错误：${message}`);
+        } finally {
+            isSyncing = false;
+            updateUI();
+        }
+    }
+
     startBtn.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: "START_RECORDING" }, () => updateUI());
+        setSyncStatus('', '');
+        lastSyncedCaseId = null;
+        chrome.runtime.sendMessage({ type: 'START_RECORDING' }, () => updateUI());
     });
 
     stopBtn.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: "STOP_RECORDING" }, (res) => {
-            updateUI();
+        chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }, async (res) => {
             if (res && res.actions) {
-                generatePythonScript(res.actions);
+                await syncRecordedCase(res.actions);
             } else {
-                alert("获取录制数据失败。");
+                setSyncStatus('获取录制数据失败。', 'error');
+                alert('获取录制数据失败。');
             }
         });
     });
 
     clearBtn.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: "CLEAR_ACTIONS" }, () => updateUI());
+        setSyncStatus('', '');
+        lastSyncedCaseId = null;
+        chrome.runtime.sendMessage({ type: 'CLEAR_ACTIONS' }, () => updateUI());
     });
 
-    async function generatePythonScript(actions) {
-        if (actions.length === 0) return alert("没有录制到任何动作。");
-        
-        let script = `import sys\nimport os\nfrom dotenv import load_dotenv\nsys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))\n\nload_dotenv()\n\nfrom ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer\n\n`;
-        script += `def test_recorded_flow(page):\n`;
-        script += `    # 增加这行，让脚本执行慢一点，并且确保能看到浏览器\n`;
-        script += `    page.wait_for_timeout(2000)\n`;
-        script += `    driver = PlaywrightDriver(page)\n`;
-        script += `    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)\n`;
-        script += `    healer = SelfHealer(use_vision=True)\n\n`;
-        
-        actions.forEach((act, index) => {
-            script += `    # Step ${index + 1}: ${act.intent}\n`;
-            let safeSelector = act.selector.replace(/"/g, "'");
-            script += `    selector_${index} = "${safeSelector}"\n`;
-            script += `    try:\n`;
-            if (act.type === "click") {
-                script += `        page.click(selector_${index}, timeout=3000)\n`;
-            } else if (act.type === "input") {
-                script += `        page.fill(selector_${index}, "${act.value}", timeout=3000)\n`;
-            }
-            script += `    except Exception:\n`;
-            script += `        current_dom = agent.get_dom_tree_str()\n`;
-            script += `        screenshot = driver.get_screenshot()\n`;
-            script += `        new_id = healer.heal(selector_${index}, "${act.intent}", current_dom, screenshot)\n`;
-            script += `        if new_id:\n`;
-            if (act.type === "click") {
-                script += `            driver.perform_action("click", new_id)\n`;
-            } else if (act.type === "input") {
-                script += `            driver.perform_action("type", new_id, "${act.value}")\n`;
-            }
-            script += `        else:\n`;
-            script += `            raise Exception("AI 自愈失败，无法完成步骤 ${index + 1}")\n\n`;
+    if (openConsoleBtn) {
+        openConsoleBtn.addEventListener('click', () => {
+            chrome.tabs.create({ url: CONSOLE_URL });
         });
-
-        const defaultFileName = `case_${new Date().getTime()}`;
-
-        try {
-            const startUrl = actions[0] && actions[0].url ? actions[0].url : null;
-            const response = await fetch("http://127.0.0.1:8000/api/cases", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    name: defaultFileName,
-                    start_url: startUrl,
-                    steps: actions,
-                    type: "json"
-                })
-            });
-            
-            if (response.ok) {
-                alert("✅ 用例已成功发送到本地管理控制台！请在浏览器中打开 http://127.0.0.1:8000 查看。");
-            } else {
-                throw new Error("Server responded with error");
-            }
-        } catch (e) {
-            console.error("上传失败，降级为下载文件", e);
-            const payload = {
-                name: defaultFileName,
-                start_url: actions[0] && actions[0].url ? actions[0].url : null,
-                steps: actions
-            };
-            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `${defaultFileName}.json`;
-            a.click();
-        }
     }
 
     updateUI();

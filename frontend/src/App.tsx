@@ -141,7 +141,7 @@ interface PromptModalOptions {
   initialValue?: string;
 }
 
-type StepType = 'click' | 'input' | 'wait' | 'assert' | 'hover' | 'select_option' | 'double_click' | 'right_click' | 'press_key' | 'scroll';
+type StepType = 'click' | 'input' | 'wait' | 'assert' | 'hover' | 'select_option' | 'set_checked' | 'double_click' | 'right_click' | 'press_key' | 'scroll';
 
 interface CaseStep {
   type: StepType;
@@ -160,7 +160,8 @@ interface CaseDoc {
   start_url?: string | null;
   steps: CaseStep[];
   tags?: string[];
-  dataset?: any[];
+  variables?: Record<string, unknown>;
+  dataset?: Record<string, unknown>[];
 }
 
 interface EnvConfig {
@@ -665,7 +666,7 @@ function App() {
       });
       if (res.data?.status === 'success') {
         const tokenText = formatTokenUsage(res.data.token_usage);
-        setSettingsTestResult({ ok: true, message: tokenText ? `${res.data.message} · Token ${tokenText}` : res.data.message });
+        setSettingsTestResult({ ok: true, message: tokenText ? `${res.data.message} · Token消耗 ${tokenText}` : res.data.message });
       }
     } catch (e: any) {
       setSettingsTestResult({ ok: false, message: e.response?.data?.error || e.message });
@@ -991,10 +992,19 @@ function App() {
     return locs;
   };
 
+  const builtInPlaceholders = new Set(['today_ymd', 'today_yyyyMMdd', 'today_mmdd']);
+
   const validateDataDriven = async (doc: CaseDoc, actionName: string) => {
     const locs = collectPlaceholders(doc);
     if (locs.length === 0) return true;
-    const keys = Array.from(new Set(locs.map(x => x.key))).sort();
+    const keys = Array.from(new Set(locs.map(x => x.key))).filter((key) => !builtInPlaceholders.has(key)).sort();
+    if (keys.length === 0) return true;
+    const variables = doc.variables || {};
+    if (!variables || typeof variables !== 'object' || Array.isArray(variables)) {
+      alert(`用例变量必须是 JSON 对象，才能${actionName}。`);
+      setLeftTab('dataset');
+      return false;
+    }
     const dataset = doc.dataset || [];
     if (!Array.isArray(dataset)) {
       alert(`数据集必须是 JSON 数组，才能${actionName}。`);
@@ -1002,7 +1012,7 @@ function App() {
       return false;
     }
     const badRows: number[] = [];
-    dataset.forEach((row, idx) => {
+    dataset.forEach((row: unknown, idx: number) => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) badRows.push(idx);
     });
     if (badRows.length > 0) {
@@ -1011,19 +1021,24 @@ function App() {
       return false;
     }
     if (dataset.length === 0) {
-      await confirmAction({
-        title: `缺少数据集`,
-        description: `用例包含变量占位符：${keys.join(', ')}\n\n请先在“数据集”页签配置数据（JSON/CSV）。`,
-        confirmText: '我知道了',
-        destructive: false
-      });
-      setLeftTab('dataset');
-      return false;
+      const missingKeys = keys.filter((k) => !(k in variables));
+      if (missingKeys.length > 0) {
+        await confirmAction({
+          title: `缺少用例变量`,
+          description: `用例包含变量占位符：${keys.join(', ')}\n\n当前缺少：${missingKeys.join(', ')}\n\n请先在“数据集”页签配置用例变量，或添加包含这些字段的数据集。`,
+          confirmText: '我知道了',
+          destructive: false
+        });
+        setLeftTab('dataset');
+        return false;
+      }
+      return true;
     }
     const missing: Array<{ row: number; key: string }> = [];
-    dataset.forEach((row: any, idx: number) => {
+    dataset.forEach((row: Record<string, unknown>, idx: number) => {
+      const merged = { ...variables, ...row };
       keys.forEach((k) => {
-        if (!(k in row)) missing.push({ row: idx, key: k });
+        if (!(k in merged)) missing.push({ row: idx, key: k });
       });
     });
     if (missing.length > 0) {
@@ -1261,6 +1276,7 @@ function App() {
       await axios.put(`/api/cases/${selectedCase.id}`, {
         start_url: caseDoc.start_url,
         steps: caseDoc.steps,
+        variables: caseDoc.variables || {},
         dataset: caseDoc.dataset,
       });
       const refreshed = await axios.get(`/api/cases/${selectedCase.id}`);
@@ -1408,7 +1424,7 @@ function App() {
       if (res.data.status === 'ok') {
         const tokenText = formatTokenUsage(res.data.token_usage);
         if (tokenText) {
-          setLogs((prev) => [...prev, `🧮 用例生成 Token: ${tokenText}`]);
+        setLogs((prev) => [...prev, `🧮 用例生成 Token消耗: ${tokenText}`]);
         }
         setShowGenerateModal(false);
         setGenerateForm({ name: '', start_url: '', instruction: '' });
@@ -2128,7 +2144,7 @@ function App() {
                   <div className="text-2xl font-semibold text-[#10a37f] mt-1">{selectedSuiteRun.summary?.heal_total || 0}</div>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                  <div className="text-xs text-zinc-500">Token</div>
+                  <div className="text-xs text-zinc-500">Token消耗</div>
                   <div className="text-2xl font-semibold text-zinc-900 mt-1">{selectedSuiteRun.summary?.token_total || 0}</div>
                 </div>
               </div>
@@ -2142,7 +2158,7 @@ function App() {
                   <div className="flex-1 min-w-0">用例</div>
                   <div className="w-20 text-right">耗时</div>
                   <div className="w-16 text-right">自愈</div>
-                  <div className="w-20 text-right font-mono">Token</div>
+                  <div className="w-20 text-right font-mono">Token消耗</div>
                   <div className="w-16 text-right">状态</div>
                   <div className="w-[92px] text-right">操作</div>
                 </div>
@@ -2173,7 +2189,7 @@ function App() {
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-zinc-500 font-mono truncate">{it?.run_id ? `RunID: ${it.run_id}` : cid}</div>
+                          <div className="text-[11px] text-zinc-500 font-mono truncate">{it?.run_id ? `运行ID: ${it.run_id}` : cid}</div>
                         </div>
                         <div className="text-xs text-zinc-500 w-20 text-right">{durationText}</div>
                         <div className="text-xs text-zinc-500 w-16 text-right">{healText}</div>
@@ -2352,7 +2368,7 @@ function App() {
                     <div className="px-4 py-2 bg-zinc-50 text-xs font-semibold text-zinc-600 flex items-center justify-between border-b border-zinc-200">
                       <div className="flex items-center gap-2">
                         <FileJson className="w-3.5 h-3.5" />
-                        {leftTab === 'editor' ? '用例编辑器' : leftTab === 'dataset' ? '数据集' : '生成脚本 (Python)'}
+                        {leftTab === 'editor' ? '用例编辑器' : leftTab === 'dataset' ? '变量与数据集' : '生成脚本 (Python)'}
                       </div>
                       <div className="flex items-center gap-2">
                         <button
@@ -2365,7 +2381,7 @@ function App() {
                           onClick={() => setLeftTab('dataset')}
                           className={`px-2 py-1 rounded-xl border text-xs transition-colors ${leftTab === 'dataset' ? 'bg-white border-zinc-200 text-zinc-900 shadow-sm' : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-900'}`}
                         >
-                          数据集
+                          变量/数据
                         </button>
                         <button
                           onClick={() => setLeftTab('python')}
@@ -2382,7 +2398,7 @@ function App() {
                         <div className="space-y-4 text-sm">
                           <div className="bg-white rounded-xl border border-zinc-200 p-4 space-y-3">
                             <div className="text-xs text-zinc-500 flex justify-between items-center">
-                              <div>RunID: <span className="font-mono text-zinc-900">{selectedRun.id}</span></div>
+                              <div>运行ID: <span className="font-mono text-zinc-900">{selectedRun.id}</span></div>
                               <div className={`px-2 py-1 rounded-md ${selectedRun.status === 'passed' || selectedRun.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' : selectedRun.status === 'failed' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'}`}>
                                 {formatStatus(selectedRun.status)}
                               </div>
@@ -2398,7 +2414,7 @@ function App() {
                               <div>日志行: <span className="text-zinc-900">{selectedRun.logs?.length || 0}</span></div>
                             </div>
                             <div className="text-xs text-zinc-500">
-                              Token: <span className="text-zinc-900 font-mono">{formatTokenUsage(selectedRun.token_usage)}</span>
+                              Token消耗: <span className="text-zinc-900 font-mono">{formatTokenUsage(selectedRun.token_usage)}</span>
                             </div>
                             {selectedRun.status === 'failed' && selectedRun.failure_reason?.category && (
                               <div className="text-xs text-zinc-500 mt-2">
@@ -2611,8 +2627,10 @@ function App() {
                           <div className="text-zinc-600 italic">加载中...</div>
                         ) : (
                           <DatasetEditor
+                            variables={caseDoc.variables || {}}
                             dataset={caseDoc.dataset || []}
-                            onChange={(ds) => setCaseDoc({ ...caseDoc, dataset: ds })}
+                            onVariablesChange={(vars) => setCaseDoc({ ...caseDoc, variables: vars })}
+                            onDatasetChange={(ds) => setCaseDoc({ ...caseDoc, dataset: ds })}
                           />
                         )
                       ) : (
@@ -2621,7 +2639,7 @@ function App() {
                         ) : (
                           <div className="space-y-3">
                             <div className="grid grid-cols-6 gap-2 items-center">
-                              <div className="col-span-1 text-xs text-zinc-500">start_url</div>
+                              <div className="col-span-1 text-xs text-zinc-500">起始URL</div>
                               <input
                                 value={caseDoc.start_url || ''}
                                 onChange={(e) => setCaseDoc({ ...caseDoc, start_url: e.target.value })}
@@ -2629,12 +2647,12 @@ function App() {
                                 className="col-span-5 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15"
                               />
                             </div>
-                            <div className="text-xs text-zinc-500">steps</div>
+                            <div className="text-xs text-zinc-500">步骤</div>
                             <div className="space-y-2">
                               {caseDoc.steps.map((s, idx) => (
                                 <div key={idx} className={`rounded-xl border border-zinc-200 bg-white p-4 space-y-3 shadow-sm hover:bg-zinc-50 transition-colors ${s.disabled ? 'opacity-50 grayscale' : ''}`}>
                                   <div className="flex items-center justify-between">
-                                    <div className="text-xs text-zinc-400 font-mono">Step {idx + 1}</div>
+                                    <div className="text-xs text-zinc-400 font-mono">步骤 {idx + 1}</div>
                                     <div className="flex items-center gap-2">
                                       <button onClick={() => moveStep(idx, 'up')} disabled={idx === 0} className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30">↑</button>
                                       <button onClick={() => moveStep(idx, 'down')} disabled={idx === caseDoc.steps.length - 1} className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30">↓</button>
@@ -2649,16 +2667,17 @@ function App() {
                                       onChange={(e) => updateStep(idx, { type: e.target.value as StepType })}
                                       className="bg-white border border-zinc-200 rounded-xl px-2 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
                                     >
-                                      <option value="click">click</option>
-                                      <option value="input">input</option>
-                                      <option value="wait">wait</option>
-                                      <option value="assert">assert</option>
-                                      <option value="hover">hover</option>
-                                      <option value="select_option">select option</option>
-                                      <option value="double_click">double click</option>
-                                      <option value="right_click">right click</option>
-                                      <option value="press_key">press key</option>
-                                      <option value="scroll">scroll</option>
+                                      <option value="click">点击</option>
+                                      <option value="input">输入</option>
+                                      <option value="wait">等待</option>
+                                      <option value="assert">断言</option>
+                                      <option value="hover">悬停</option>
+                                      <option value="select_option">选择选项</option>
+                                      <option value="set_checked">勾选/取消勾选</option>
+                                      <option value="double_click">双击</option>
+                                      <option value="right_click">右键</option>
+                                      <option value="press_key">按键</option>
+                                      <option value="scroll">滚动</option>
                                     </select>
                                     {s.type === 'assert' ? (
                                       <select
@@ -2687,9 +2706,9 @@ function App() {
                                       placeholder="selector（Playwright 支持）"
                                     />
                                   )}
-                                  {(['input', 'wait', 'select_option', 'press_key', 'scroll'].includes(s.type || '') || (s.type === 'assert' && s.assert_type !== 'visible')) && (
+                                  {(['input', 'wait', 'select_option', 'set_checked', 'press_key', 'scroll'].includes(s.type || '') || (s.type === 'assert' && s.assert_type !== 'visible')) && (
                                     <input
-                                      value={s.value || ''}
+                                      value={s.value === undefined || s.value === null ? '' : String(s.value)}
                                       onChange={(e) => updateStep(idx, { value: e.target.value })}
                                       className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50 font-mono"
                                       placeholder={
@@ -2697,6 +2716,7 @@ function App() {
                                         s.type === 'scroll' ? '滚动方向 (up/down)' :
                                         s.type === 'press_key' ? '按键名称 (如 Enter, Escape)' :
                                         s.type === 'select_option' ? '选项的 value 或 text' :
+                                        s.type === 'set_checked' ? 'true / false' :
                                         s.type === 'assert' ? '预期包含的内容' : '输入值'
                                       }
                                     />
@@ -3108,7 +3128,7 @@ function App() {
                       onClick={() => setSettingsTab('prompts')}
                       className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${settingsTab === 'prompts' ? 'bg-white text-zinc-900 border border-zinc-200 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'}`}
                     >
-                      Prompt 预设
+                      提示词预设
                     </button>
                   </div>
                 </div>
@@ -3222,7 +3242,7 @@ function App() {
             ) : (
               <div className="flex flex-col h-[600px] space-y-4 pt-4 border-t border-zinc-200">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-zinc-600 uppercase tracking-wider">选择 Prompt 文件</label>
+                  <label className="block text-xs font-semibold text-zinc-600 uppercase tracking-wider">选择提示词文件</label>
                   <select
                     value={activePromptFile}
                     onChange={e => setActivePromptFile(e.target.value)}
@@ -3243,7 +3263,7 @@ function App() {
                     />
                   ) : (
                     <div className="flex items-center justify-center h-full text-zinc-500 text-sm">
-                      没有找到 Prompt 预设文件
+                      没有找到提示词预设文件
                     </div>
                   )}
                 </div>

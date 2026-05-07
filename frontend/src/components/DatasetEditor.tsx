@@ -1,31 +1,58 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
+
+type JsonObject = Record<string, unknown>;
+type DatasetRow = Record<string, unknown>;
 
 type Props = {
-  dataset: any[];
-  onChange: (dataset: any[]) => void;
+  variables: JsonObject;
+  dataset: DatasetRow[];
+  onVariablesChange: (variables: JsonObject) => void;
+  onDatasetChange: (dataset: DatasetRow[]) => void;
 };
 
-export default function DatasetEditor({ dataset, onChange }: Props) {
-  const initial = useMemo(() => JSON.stringify(dataset || [], null, 2), []);
-  const [text, setText] = useState(initial);
-  const [error, setError] = useState<string | null>(null);
+const getErrorMessage = (err: unknown) => err instanceof Error ? err.message : String(err);
 
-  const commit = (next: any[]) => {
-    setError(null);
-    onChange(next);
-    setText(JSON.stringify(next, null, 2));
+export default function DatasetEditor({ variables, dataset, onVariablesChange, onDatasetChange }: Props) {
+  const [variablesText, setVariablesText] = useState(() => JSON.stringify(variables || {}, null, 2));
+  const [datasetText, setDatasetText] = useState(() => JSON.stringify(dataset || [], null, 2));
+  const [variablesError, setVariablesError] = useState<string | null>(null);
+  const [datasetError, setDatasetError] = useState<string | null>(null);
+
+  const commitVariables = (next: JsonObject) => {
+    setVariablesError(null);
+    onVariablesChange(next);
+    setVariablesText(JSON.stringify(next, null, 2));
   };
 
-  const handleBlur = () => {
+  const commitDataset = (next: DatasetRow[]) => {
+    setDatasetError(null);
+    onDatasetChange(next);
+    setDatasetText(JSON.stringify(next, null, 2));
+  };
+
+  const handleVariablesBlur = () => {
     try {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) {
-        setError('数据集必须是一个 JSON 数组（List）');
+      const parsed = JSON.parse(variablesText || '{}') as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setVariablesError('用例变量必须是一个 JSON 对象');
         return;
       }
-      commit(parsed);
-    } catch (e: any) {
-      setError('无效的 JSON 格式: ' + e.message);
+      commitVariables(parsed as JsonObject);
+    } catch (err: unknown) {
+      setVariablesError('无效的 JSON 格式: ' + getErrorMessage(err));
+    }
+  };
+
+  const handleDatasetBlur = () => {
+    try {
+      const parsed = JSON.parse(datasetText || '[]') as unknown;
+      if (!Array.isArray(parsed)) {
+        setDatasetError('数据集必须是一个 JSON 数组');
+        return;
+      }
+      commitDataset(parsed as DatasetRow[]);
+    } catch (err: unknown) {
+      setDatasetError('无效的 JSON 格式: ' + getErrorMessage(err));
     }
   };
 
@@ -36,32 +63,33 @@ export default function DatasetEditor({ dataset, onChange }: Props) {
     reader.onload = (ev) => {
       const content = ev.target?.result as string;
       try {
-        let parsed: any[] = [];
+        let parsed: DatasetRow[] = [];
         if (file.name.endsWith('.csv')) {
           const lines = content.split('\n').filter(line => line.trim() !== '');
           if (lines.length < 2) {
-            setError('CSV 格式无效或无数据');
+            setDatasetError('CSV 格式无效或无数据');
             return;
           }
           const headers = lines[0].split(',').map(h => h.trim());
           for (let i = 1; i < lines.length; i++) {
             const values = lines[i].split(',').map(v => v.trim());
-            const obj: any = {};
+            const obj: DatasetRow = {};
             headers.forEach((h, idx) => {
               obj[h] = values[idx] || '';
             });
             parsed.push(obj);
           }
         } else {
-          parsed = JSON.parse(content);
-          if (!Array.isArray(parsed)) {
-            setError('上传的 JSON 必须是一个数组');
+          const fileJson = JSON.parse(content) as unknown;
+          if (!Array.isArray(fileJson)) {
+            setDatasetError('上传的 JSON 必须是一个数组');
             return;
           }
+          parsed = fileJson as DatasetRow[];
         }
-        commit(parsed);
-      } catch (err: any) {
-        setError('解析文件失败: ' + err.message);
+        commitDataset(parsed);
+      } catch (err: unknown) {
+        setDatasetError('解析文件失败: ' + getErrorMessage(err));
       }
     };
     reader.readAsText(file);
@@ -70,26 +98,47 @@ export default function DatasetEditor({ dataset, onChange }: Props) {
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-      <div className="flex items-start justify-between">
-        <div className="flex flex-col gap-1">
-          <span className="text-[13px] font-semibold tracking-wide text-zinc-900">绑定数据集</span>
-          <span className="text-[11px] text-zinc-500 max-w-xl leading-relaxed">
-            运行时会自动使用 <code className="text-[#0e8a6a] px-1 bg-[#10a37f]/10 rounded">{'${变量名}'}</code> 替换用例中的内容。如果数组为空或未配置，则仅运行一次。
-          </span>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 min-h-0 flex-1">
+        <div className="flex flex-col min-h-0 rounded-xl border border-zinc-200 bg-white p-4">
+          <div className="flex flex-col gap-1 mb-3">
+            <span className="text-[13px] font-semibold tracking-wide text-zinc-900">用例变量</span>
+            <span className="text-[11px] text-zinc-500 leading-relaxed">
+              默认变量，适合单次运行。可在 <code className="text-[#0e8a6a] px-1 bg-[#10a37f]/10 rounded">{'${变量名}'}</code> 中引用。内置 <code className="text-[#0e8a6a] px-1 bg-[#10a37f]/10 rounded">{'${today_ymd}'}</code> 会生成当天验证码格式，例如 260507。
+            </span>
+          </div>
+          {variablesError && <div className="text-xs text-rose-500 mb-2">{variablesError}</div>}
+          <textarea
+            className="flex-1 min-h-[180px] w-full bg-white border border-zinc-200 rounded-xl p-4 text-[13px] text-zinc-900 font-mono focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all custom-scrollbar leading-relaxed"
+            value={variablesText}
+            onChange={(e) => setVariablesText(e.target.value)}
+            onBlur={handleVariablesBlur}
+            placeholder={`{\n  "username": "admin",\n  "password": "123456",\n  "base_url": "https://qa.example.com"\n}`}
+          />
         </div>
-        <label className="shrink-0 cursor-pointer bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 px-4 py-2 rounded-xl text-[11px] font-semibold transition-all">
-          导入 JSON / CSV 文件
-          <input type="file" accept=".json,.csv" className="hidden" onChange={handleFileChange} />
-        </label>
+
+        <div className="flex flex-col min-h-0 rounded-xl border border-zinc-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-[13px] font-semibold tracking-wide text-zinc-900">数据集</span>
+              <span className="text-[11px] text-zinc-500 leading-relaxed">
+                多行数据会循环运行；每行会覆盖同名用例变量。数组为空时仅使用左侧用例变量运行一次。
+              </span>
+            </div>
+            <label className="shrink-0 cursor-pointer bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 px-4 py-2 rounded-xl text-[11px] font-semibold transition-all">
+              导入 JSON / CSV 文件
+              <input type="file" accept=".json,.csv" className="hidden" onChange={handleFileChange} />
+            </label>
+          </div>
+          {datasetError && <div className="text-xs text-rose-500 mb-2">{datasetError}</div>}
+          <textarea
+            className="flex-1 min-h-[180px] w-full bg-white border border-zinc-200 rounded-xl p-4 text-[13px] text-zinc-900 font-mono focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all custom-scrollbar leading-relaxed"
+            value={datasetText}
+            onChange={(e) => setDatasetText(e.target.value)}
+            onBlur={handleDatasetBlur}
+            placeholder={`[\n  {\n    "username": "admin",\n    "password": "123"\n  },\n  {\n    "username": "guest",\n    "password": "456"\n  }\n]`}
+          />
+        </div>
       </div>
-      {error && <div className="text-xs text-rose-500">{error}</div>}
-      <textarea
-        className="flex-1 w-full bg-white border border-zinc-200 rounded-xl p-4 text-[13px] text-zinc-900 font-mono focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all custom-scrollbar leading-relaxed"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={handleBlur}
-        placeholder={`[\n  {\n    "username": "admin",\n    "password": "123"\n  },\n  {\n    "username": "guest",\n    "password": "456"\n  }\n]\n\n// 提示：如果你导入 CSV 文件，它会自动转化为上述的 JSON Array 格式。\n// 第一行（表头）会作为变量名（例如 username）。`}
-      />
     </div>
   );
 }

@@ -38,6 +38,20 @@ try {
     });
 } catch (e) {}
 
+function applyThemeFlag() {
+    try {
+        const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (overlayEl) overlayEl.classList.toggle("ai-dark", !!isDark);
+    } catch (e) {}
+}
+
+try {
+    if (window.matchMedia) {
+        const m = window.matchMedia("(prefers-color-scheme: dark)");
+        if (m && m.addEventListener) m.addEventListener("change", applyThemeFlag);
+    }
+} catch (e) {}
+
 function ensureClickLayer() {
     if (!document.body) return;
     if (!clickLayerEl) {
@@ -52,7 +66,7 @@ function ensureClickLayer() {
 function showClickFeedback(x, y, ok, label) {
     ensureClickLayer();
     const pulse = document.createElement("div");
-    pulse.className = `ai-tester-click-pulse${ok ? " ai-ok" : ""}`;
+    pulse.className = "ai-tester-click-pulse";
     pulse.style.left = `${x}px`;
     pulse.style.top = `${y}px`;
     clickLayerEl.appendChild(pulse);
@@ -62,6 +76,11 @@ function showClickFeedback(x, y, ok, label) {
     text.style.left = `${x}px`;
     text.style.top = `${y}px`;
     text.textContent = label || (ok ? "已记录" : "未记录");
+    try {
+        if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+            text.classList.add("ai-dark");
+        }
+    } catch (e) {}
     clickLayerEl.appendChild(text);
 
     window.setTimeout(() => {
@@ -82,20 +101,35 @@ function ensureOverlay() {
         const title = document.createElement("div");
         title.className = "ai-title";
 
+        const logo = document.createElement("div");
+        logo.className = "ai-logo";
+        logo.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <path d="m7 11 2-2-2-2"></path>
+            <path d="M11 13h6"></path>
+          </svg>
+        `;
+
         overlayDotEl = document.createElement("div");
         overlayDotEl.className = "ai-dot";
 
         const titleText = document.createElement("div");
         titleText.className = "ai-title-text";
-        titleText.textContent = "AI 录制器";
+        titleText.textContent = "SOLO AI 录制器";
 
-        title.appendChild(overlayDotEl);
+        title.appendChild(logo);
         title.appendChild(titleText);
+        title.appendChild(overlayDotEl);
 
         const minBtn = document.createElement("button");
         minBtn.className = "ai-min-btn";
         minBtn.type = "button";
-        minBtn.textContent = "–";
+        minBtn.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14"></path>
+          </svg>
+        `;
         minBtn.addEventListener("click", (e) => {
             e.stopPropagation();
             overlayEl.classList.toggle("ai-minimized");
@@ -162,6 +196,11 @@ function ensureOverlay() {
     if (overlayEl.parentElement !== document.body || overlayEl.nextSibling) {
         document.body.appendChild(overlayEl);
     }
+
+    try {
+        const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        overlayEl.classList.toggle("ai-dark", !!isDark);
+    } catch (e) {}
 }
 
 function updateOverlay() {
@@ -278,7 +317,18 @@ document.addEventListener('click', async (e) => {
     const cx = e.clientX;
     const cy = e.clientY;
     
-    // 忽略 input 的点击，因为后面有 change 或 input 事件处理，避免重复录制
+    if (target.tagName === 'TEXTAREA') {
+        showClickFeedback(cx, cy, false, "输入后会记录");
+        return;
+    }
+    if (target.tagName === 'SELECT' || target.tagName === 'OPTION') {
+        showClickFeedback(cx, cy, false, "选择后会记录");
+        return;
+    }
+    if (target.tagName === 'INPUT' && ['checkbox', 'radio'].includes(target.type)) {
+        showClickFeedback(cx, cy, false, "选择后会记录");
+        return;
+    }
     if (target.tagName === 'INPUT' && ['text', 'password', 'email', 'number', 'search', 'tel', 'url'].includes(target.type)) {
         showClickFeedback(cx, cy, false, "输入后会记录");
         return;
@@ -326,12 +376,33 @@ document.addEventListener('click', async (e) => {
 // 使用 input/change 事件，加一点防抖处理避免重复触发
 let inputTimeout = null;
 let lastInputTarget = null;
+
+function getReadableLabel(el) {
+    try {
+        if (!el) return "";
+        if (el.getAttribute && el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+        if (el.placeholder) return el.placeholder;
+        if (el.name) return el.name;
+        if (el.id) {
+            const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+            if (label && label.innerText) return label.innerText.trim();
+        }
+        const parentLabel = el.closest ? el.closest('label') : null;
+        if (parentLabel && parentLabel.innerText) return parentLabel.innerText.trim();
+        return "";
+    } catch (e) {
+        return "";
+    }
+}
 document.addEventListener('input', async (e) => {
     if (!isRecording) return;
     if (e.target.closest('#ai-tester-overlay')) return;
 
+    if (e.target.closest('#ai-tester-overlay')) return;
+
     const target = e.target;
-    if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') return;
+    const isEditable = target && (target.isContentEditable || target.getAttribute && target.getAttribute('contenteditable') === 'true');
+    if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && !isEditable) return;
     if (target.tagName === 'INPUT' && !['text', 'password', 'email', 'number', 'search', 'tel', 'url'].includes(target.type)) return;
 
     const cx = e.clientX;
@@ -342,8 +413,8 @@ document.addEventListener('input', async (e) => {
     inputTimeout = window.setTimeout(() => {
         if (!lastInputTarget) return;
         const selector = getCssSelector(lastInputTarget);
-        const value = lastInputTarget.value;
-        let text = lastInputTarget.placeholder || lastInputTarget.getAttribute('aria-label') || lastInputTarget.name || lastInputTarget.tagName.toLowerCase();
+        const value = (lastInputTarget.value !== undefined ? lastInputTarget.value : (lastInputTarget.innerText || '')).trim();
+        let text = getReadableLabel(lastInputTarget) || lastInputTarget.tagName.toLowerCase();
         const intentName = `在 "${text}" 中输入内容`;
         captureSnapshot(lastInputTarget).then(snapshot => {
             const action = {
@@ -370,6 +441,36 @@ document.addEventListener('change', async (e) => {
     if (e.target.closest('#ai-tester-overlay')) return;
     
     const target = e.target;
+    if (target.tagName === 'INPUT' && ['checkbox', 'radio'].includes(target.type)) {
+        const selector = getCssSelector(target);
+        const checked = !!target.checked;
+        const cx = e.clientX;
+        const cy = e.clientY;
+        target.classList.add('ai-tester-highlight');
+        setTimeout(() => {
+            target.classList.remove('ai-tester-highlight');
+        }, 500);
+        const labelText = getReadableLabel(target) || target.name || target.id || target.tagName.toLowerCase();
+        const intentName = checked ? `勾选 "${labelText}"` : `取消勾选 "${labelText}"`;
+        captureSnapshot(target).then(snapshot => {
+            const action = {
+                type: "set_checked",
+                selector: selector,
+                value: checked,
+                intent: intentName,
+                snapshot: snapshot,
+                url: window.location.href
+            };
+            chrome.runtime.sendMessage({ type: "ADD_ACTION", action: action }, (res) => {
+                const ok = res && (res.status === "action_added" || res.status === "action_updated");
+                lastRecordedText = `✅ ${intentName}`;
+                ensureOverlay();
+                updateOverlay();
+                showClickFeedback(cx, cy, ok, ok ? "已记录" : "未记录");
+            });
+        });
+        return;
+    }
     if (target.tagName !== 'SELECT') return;
     
     const selector = getCssSelector(target);
@@ -382,12 +483,13 @@ document.addEventListener('change', async (e) => {
         target.classList.remove('ai-tester-highlight');
     }, 500);
     
-    let text = target.placeholder || target.getAttribute('aria-label') || target.name || target.tagName.toLowerCase();
-    const intentName = `在 "${text}" 中输入内容`;
+    let text = getReadableLabel(target) || target.tagName.toLowerCase();
+    const optText = target.selectedOptions && target.selectedOptions[0] ? target.selectedOptions[0].textContent.trim() : value;
+    const intentName = `在 "${text}" 中选择 "${String(optText || value).substring(0, 30)}"`;
     
     captureSnapshot(target).then(snapshot => {
         const action = {
-            type: "input",
+            type: "select_option",
             selector: selector,
             value: value,
             intent: intentName, 
@@ -403,3 +505,55 @@ document.addEventListener('change', async (e) => {
         });
     });
 }, true);
+
+let lastNavHref = window.location.href;
+function recordNavActions(nextHref) {
+    const u = new URL(nextHref);
+    const urlKey = (u.pathname || "/") + (u.search || "");
+    const waitAction = {
+        type: "wait",
+        selector: "",
+        value: "800",
+        intent: "等待页面跳转",
+        snapshot: null,
+        url: nextHref
+    };
+    const assertAction = {
+        type: "assert",
+        assert_type: "url",
+        selector: "",
+        value: urlKey,
+        intent: `断言 URL 包含 "${urlKey}"`,
+        snapshot: null,
+        url: nextHref
+    };
+    chrome.runtime.sendMessage({ type: "ADD_ACTION", action: waitAction }, () => {});
+    chrome.runtime.sendMessage({ type: "ADD_ACTION", action: assertAction }, () => {});
+    lastRecordedText = `✅ 路由跳转：${urlKey}`;
+    ensureOverlay();
+    updateOverlay();
+}
+
+try {
+    const notify = () => window.dispatchEvent(new Event("ai-tester-location-change"));
+    const _pushState = history.pushState;
+    const _replaceState = history.replaceState;
+    history.pushState = function () {
+        const r = _pushState.apply(this, arguments);
+        notify();
+        return r;
+    };
+    history.replaceState = function () {
+        const r = _replaceState.apply(this, arguments);
+        notify();
+        return r;
+    };
+    window.addEventListener("popstate", notify);
+    window.addEventListener("ai-tester-location-change", () => {
+        if (!isRecording) return;
+        const href = window.location.href;
+        if (href === lastNavHref) return;
+        lastNavHref = href;
+        recordNavActions(href);
+    });
+} catch (e) {}
