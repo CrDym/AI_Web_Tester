@@ -37,8 +37,9 @@
 - 🧰 **失败用例修复建议**：失败后可生成 AI 修复建议（根因解释 + 可执行的 patched_steps），并支持一键应用到用例。
 - 📦 **测试套件与执行计划 (Test Suites)**：支持将用例组装为 Suite 批量运行。可指定全局的“前置登录用例”（通过注入 Browser Context 共享状态），一次登录，全套件复用。
 - 📺 **实时监控与运行历史**：套件执行时，控制台右侧会**实时播放测试画面**和执行日志。每次运行的截帧、步骤耗时、Token 与日志均会落盘，方便随时回放审计。
-- 🧩 **Chrome 录制插件伴侣**：配合专属浏览器插件，在真实网页上点一点即可录制操作步骤，用例会自动同步到 Web 控制台。
-- ⚡ **丰富的交互能力支持**：支持 `click`, `input`, `wait`, `hover`, `select_option`, `press_key`, `scroll` (支持局部容器滚动) 以及多种 `assert` (断言) 动作。
+- 🧩 **Chrome 录制插件伴侣**：配合专属浏览器插件，在真实网页上点一点即可录制操作步骤，停止录制后自动同步到 Web 控制台；同步失败时会下载 JSON 兜底。
+- 🧪 **用例参数化与数据驱动**：支持用例级 `variables`、CSV/JSON `dataset`、`${变量名}` 字符串替换，以及 `${today_ymd}` 等内置日期变量，适合多账号/多数据回归。
+- ⚡ **丰富的交互能力支持**：支持 `click`, `input`, `wait`, `hover`, `select_option`, `set_checked`, `double_click`, `right_click`, `press_key`, `scroll` (支持局部容器滚动) 以及多种 `assert` (断言) 动作。
 
 ---
 
@@ -71,7 +72,8 @@ ai-web-tester/
 
 ## 🧠 核心概念
 
-- **用例（Case）**：包含起始 URL + steps（动作序列）。持久化存储在 `tests/tester.db`，并支持 **.bak 备份一键恢复**。
+- **用例（Case）**：包含起始 URL + steps（动作序列），可配置 `variables` 与 `dataset`。持久化存储在 `tests/tester.db`，并支持 **.bak 备份一键恢复**。
+- **变量与数据集**：步骤中的 `start_url` / `selector` / `intent` / `value` / `url` 支持 `${变量名}` 替换；`dataset` 每行会覆盖同名 `variables`，空数据集时用 `variables` 单次运行。
 - **步骤（Step）**：单个动作（click/input/assert...），推荐以 `intent` 描述“你想做什么”，`selector` 可为空。
 - **运行（Run）**：一次用例执行的结果与产物，支持回放与审计。
 - **自愈（Heal）**：当 selector 失效/缺失时，引擎用 DOM（可选截图）+ intent 调用大模型寻找候选定位并继续执行。
@@ -148,10 +150,17 @@ npm run dev
 {
   "id": "登录.json",
   "name": "登录",
-  "start_url": "https://example.com/login",
+  "start_url": "${base_url}/login",
+  "variables": {
+    "base_url": "https://example.com",
+    "username": "admin",
+    "password": "123456"
+  },
+  "dataset": [],
   "steps": [
-    { "type": "input", "selector": "", "value": "admin", "intent": "在用户名输入框输入账号" },
-    { "type": "input", "selector": "", "value": "123456", "intent": "在密码输入框输入密码" },
+    { "type": "input", "selector": "", "value": "${username}", "intent": "在用户名输入框输入账号 ${username}" },
+    { "type": "input", "selector": "", "value": "${password}", "intent": "在密码输入框输入密码" },
+    { "type": "input", "selector": "", "value": "${today_ymd}", "intent": "输入当天验证码" },
     { "type": "click", "selector": "", "intent": "点击登录按钮" },
     { "type": "assert", "assert_type": "text", "value": "登录成功", "intent": "页面提示登录成功" }
   ]
@@ -159,11 +168,18 @@ npm run dev
 ```
 
 字段说明：
-- `type`：`click` / `input` / `wait` / `assert` / `hover` / `select_option` / `press_key` / `scroll` / `double_click` / `right_click`
+- `type`：`click` / `input` / `wait` / `assert` / `hover` / `select_option` / `set_checked` / `double_click` / `right_click` / `press_key` / `scroll`
 - `selector`：可为空。为空或失效时，会触发自愈（基于 `intent` 重新定位）
 - `intent`：推荐必填。越具体越稳定（例如“弹窗底部的确认按钮”比“确认按钮”更稳）
 - `value`：`input` 时为输入内容；`wait` 时为毫秒字符串；`assert` 时为断言目标文本/URL片段等
+- `variables`：用例级默认变量，适合单次运行或作为数据集默认值
+- `dataset`：JSON 数组；每一行会和 `variables` 合并后运行一次，同名字段以数据集行为准
 - `assert_type`：`text` / `url` / `visible`
+
+内置变量：
+- `${today_ymd}`：当天日期，格式 `YYMMDD`，例如 `260507`，适合日期验证码
+- `${today_yyyyMMdd}`：当天日期，格式 `YYYYMMDD`
+- `${today_mmdd}`：当天日期，格式 `MMDD`
 
 ### 套件 JSON（Suite）
 
@@ -216,6 +232,7 @@ npm run dev
 ### 用例编辑器
 
 - **步骤编辑**：维护 `type/selector/intent/value/assert_type` 等字段
+- **变量/数据**：维护用例级 `variables` 与 CSV/JSON `dataset`；支持 `${变量名}`、`${today_ymd}` 等占位符
 - **脚本视图**：查看后端动态生成的 pytest 脚本（用于排错与 CI 集成）
 - **保存/回滚**：保存用例到 SQLite（`tests/tester.db`）；更新前自动写入 `tests/recorded_cases/<case_id>.json.bak` 备份并支持一键回滚
 
@@ -266,6 +283,7 @@ npm run dev
 | 用例 | POST | `/api/cases/{case_id}/rename` | 重命名用例 |
 | 用例 | POST | `/api/cases/{case_id}/restore` | 从 `tests/recorded_cases/<case_id>.json.bak` 回滚到上一个版本 |
 | 用例 | POST | `/api/cases/generate` | NL2Case：自然语言生成 steps（返回 token_usage） |
+| 录制器 | POST | `/api/recorder/cases` | Chrome 插件本地同步录制用例；用于扩展场景，失败时插件会下载 JSON 兜底 |
 | 自愈 | POST | `/api/cases/{case_id}/heal/approve` | 审计通过后写回 selector（支持 old_selector 为空时按 intent 定位步骤） |
 | 脚本 | GET | `/api/cases/{case_id}/script` | 查看动态生成的 pytest 脚本 |
 | 运行 | POST | `/api/run/{case_id}` | 启动单用例运行（返回 run_id/session_id） |
@@ -325,13 +343,14 @@ OPENAI_MODEL_NAME=gpt-4o-mini
 
 ## 🧩 Chrome 插件录制指南
 
-插件目录在 `extension/`，用于把你在页面上的点击/输入转成 steps，并提示你补充每一步的 intent。
+插件目录在 `extension/`，用于把你在页面上的点击、输入、选择、勾选、SPA 路由跳转等操作转成 steps，并提示你补充每一步的 intent。
 
 推荐工作方式：
 1. 安装插件：Chrome → `chrome://extensions/` → 开发者模式 → 加载已解压 → 选择 `extension/`
 2. 打开待测系统页面，点击插件开始录制
 3. 每执行一步操作，按提示填写该步骤的 intent（越具体越稳）
-4. 停止录制后，产物会同步到 Web 控制台（你可以再在编辑器里补充/调整 steps）
+4. 停止录制后，产物会自动同步到 Web 控制台；如果本地后端不可达或校验失败，插件会自动下载 JSON 文件兜底
+5. 同步成功后刷新控制台用例列表，即可继续补充变量、断言或整理步骤
 
 ---
 

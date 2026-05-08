@@ -338,8 +338,13 @@ def _migrate_run_meta(meta: Any, meta_path: Optional[str] = None) -> Dict[str, A
         meta["heal_events"] = []
         changed = True
     if "failure_reason" not in meta:
-        meta["failure_reason"] = None
+        meta["failure_reason"] = _infer_failure_reason(meta.get("logs") or []) if meta.get("status") == "failed" else None
         changed = True
+    elif meta.get("status") == "failed":
+        normalized = _normalize_failure_reason(meta.get("failure_reason"), meta.get("logs") or [])
+        if normalized != meta.get("failure_reason"):
+            meta["failure_reason"] = normalized
+            changed = True
     if "explore" in meta:
         meta.pop("explore", None)
         changed = True
@@ -442,6 +447,138 @@ def _extract_last_step_index_from_logs(logs: List[str]) -> Optional[int]:
         return max(0, last - 1)
     except Exception:
         return None
+
+_FAILURE_DEFINITIONS = [
+    {
+        "category": "selector_not_found",
+        "label": "元素定位失败",
+        "severity": "high",
+        "patterns": [
+            r"waiting for locator",
+            r"locator\(.+\)\.(click|fill|hover|check|uncheck|select_option|dblclick)",
+            r"No node found for selector",
+            r"Unable to find|not found",
+        ],
+        "suggestion": "优先检查 selector 是否失效；如果 selector 为空或页面结构变化，建议补充更具体的 intent 后重新运行自愈。",
+    },
+    {
+        "category": "strict_mode",
+        "label": "定位命中多个元素",
+        "severity": "medium",
+        "patterns": [r"strict mode violation", r"resolved to \d+ elements"],
+        "suggestion": "当前定位不唯一。建议补充父级区域、按钮文案或 data-testid，让 selector 指向唯一元素。",
+    },
+    {
+        "category": "element_obscured",
+        "label": "元素被遮挡",
+        "severity": "medium",
+        "patterns": [r"intercepts pointer events", r"element is outside of the viewport", r"Element is not visible", r"not visible", r"receives pointer events"],
+        "suggestion": "通常是弹窗、遮罩、Toast 或滚动位置导致。建议先关闭遮挡层，或在步骤前增加滚动/等待。",
+    },
+    {
+        "category": "iframe",
+        "label": "iframe/上下文问题",
+        "severity": "medium",
+        "patterns": [r"frame was detached", r"Frame was detached", r"Execution context was destroyed", r"Target closed", r"frame locator|iframe"],
+        "suggestion": "目标元素可能在 iframe 或页面上下文已切换。建议确认是否需要 frame_locator，或等待页面稳定后再操作。",
+    },
+    {
+        "category": "timeout",
+        "label": "执行超时",
+        "severity": "medium",
+        "patterns": [r"Timeout(?:Error)?", r"timed out", r"Timeout \d+ms exceeded"],
+        "suggestion": "页面响应或接口返回较慢。建议检查环境稳定性，必要时增加显式等待或拆分步骤。",
+    },
+    {
+        "category": "assertion",
+        "label": "断言失败",
+        "severity": "high",
+        "patterns": [r"AssertionError", r"assert .* failed", r"Expected .* to", r"expect\("],
+        "suggestion": "页面已执行到断言阶段，但实际结果不符合预期。建议核对预期文案、URL 或业务数据。",
+    },
+    {
+        "category": "navigation",
+        "label": "页面导航失败",
+        "severity": "high",
+        "patterns": [r"net::ERR", r"Navigation timeout", r"page\.goto", r"ERR_CONNECTION", r"ERR_NAME_NOT_RESOLVED"],
+        "suggestion": "起始地址或跳转页面不可达。建议检查环境地址、网络、登录态或 base_url 配置。",
+    },
+    {
+        "category": "data_binding",
+        "label": "变量/数据绑定错误",
+        "severity": "high",
+        "patterns": [r"NameError: name '.+' is not defined", r"KeyError", r"缺少变量|placeholder|变量占位符"],
+        "suggestion": "用例中引用的变量没有被正确传入。建议检查 variables/dataset 是否包含对应字段。",
+    },
+    {
+        "category": "python_exception",
+        "label": "脚本执行异常",
+        "severity": "high",
+        "patterns": [r"Traceback \(most recent call last\)", r"TypeError", r"ValueError", r"ImportError", r"ModuleNotFoundError"],
+        "suggestion": "执行脚本自身出现异常。建议查看日志尾部错误栈，确认步骤类型、依赖或生成脚本是否异常。",
+    },
+]
+
+def _pick_failure_line(lines: List[str], patterns: List[str]) -> Optional[str]:
+    compiled = [re.compile(p, re.I) for p in patterns]
+    for line in reversed(lines):
+        text = str(line)
+        for rx in compiled:
+            if rx.search(text):
+                return text
+    return None
+
+def _infer_failure_reason(logs: List[str]) -> Dict[str, Any]:
+    tail = [str(x) for x in (logs or []) if str(x or "").strip()]
+    tail = tail[-160:]
+    failed_step_index = _extract_last_step_index_from_logs(tail)
+    failed_step_no = failed_step_index + 1 if failed_step_index is not None else None
+    for definition in _FAILURE_DEFINITIONS:
+        line = _pick_failure_line(tail, definition["patterns"])
+        if line:
+            return {
+                "category": definition["category"],
+                "label": definition["label"],
+                "severity": definition["severity"],
+                "message": line,
+                "failed_step_index": failed_step_index,
+                "failed_step_no": failed_step_no,
+                "suggestion": definition["suggestion"],
+            }
+    return {
+        "category": "unknown",
+        "label": "未知失败",
+        "severity": "low",
+        "message": tail[-1] if tail else "",
+        "failed_step_index": failed_step_index,
+        "failed_step_no": failed_step_no,
+        "suggestion": "暂未识别出明确失败类型。建议查看日志尾部，并结合最后一张截图判断页面状态。",
+    }
+
+def _normalize_failure_reason(reason: Any, logs: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    if not reason and logs:
+        return _infer_failure_reason(logs)
+    if not isinstance(reason, dict):
+        return None
+    category = str(reason.get("category") or "unknown")
+    definition = next((d for d in _FAILURE_DEFINITIONS if d["category"] == category), None)
+    normalized = dict(reason)
+    if definition:
+        normalized.setdefault("label", definition["label"])
+        normalized.setdefault("severity", definition["severity"])
+        normalized.setdefault("suggestion", definition["suggestion"])
+    else:
+        normalized.setdefault("label", "未知失败")
+        normalized.setdefault("severity", "low")
+        normalized.setdefault("suggestion", "暂未识别出明确失败类型。建议查看日志尾部，并结合最后一张截图判断页面状态。")
+    if "failed_step_index" not in normalized:
+        step_idx = _extract_last_step_index_from_logs(logs or [])
+        normalized["failed_step_index"] = step_idx
+        normalized["failed_step_no"] = step_idx + 1 if step_idx is not None else None
+    if "failed_step_no" not in normalized and normalized.get("failed_step_index") is not None:
+        normalized["failed_step_no"] = int(normalized["failed_step_index"]) + 1
+    normalized.setdefault("message", "")
+    return normalized
 
 def _make_ai_fix_suggestion(run_meta: Dict[str, Any], case_doc: Dict[str, Any], force: bool = False) -> Dict[str, Any]:
     if not force and run_meta.get("ai_fix_suggestion"):
@@ -1690,24 +1827,6 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
     # 异步启动 pytest 进程
     asyncio.create_task(run_pytest_worker(session_id, resolved_script_path, temp_file.name if temp_file else None, wait_for_ws=wait_for_ws, extra_env=extra_env))
     return {"run_id": run_id, "session_id": session_id}
-
-def _infer_failure_reason(logs: List[str]) -> Dict[str, Any]:
-    tail = [str(x) for x in (logs or []) if x]
-    tail = tail[-120:]
-    patterns = [
-        ("data_binding", re.compile(r"NameError: name '.+' is not defined|is not defined", re.I)),
-        ("strict_mode", re.compile(r"strict mode violation", re.I)),
-        ("timeout", re.compile(r"Timeout(?:Error)?|timed out", re.I)),
-        ("selector_not_found", re.compile(r"No node found for selector|waiting for locator|locator\(.+\)\.click|locator\(.+\)\.fill", re.I)),
-        ("iframe", re.compile(r"frame was detached|target closed|Execution context was destroyed", re.I)),
-        ("assertion", re.compile(r"AssertionError|assert .* failed", re.I)),
-        ("navigation", re.compile(r"net::ERR|Navigation timeout|page\.goto", re.I)),
-    ]
-    for category, rx in patterns:
-        for line in reversed(tail):
-            if rx.search(line):
-                return {"category": category, "message": line}
-    return {"category": "unknown", "message": tail[-1] if tail else ""}
 
 async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Optional[str] = None, wait_for_ws: bool = True, extra_env: Optional[Dict[str, str]] = None):
     if wait_for_ws:

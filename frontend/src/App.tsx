@@ -14,7 +14,12 @@ interface TestCase {
 
 interface FailureReason {
   category: string;
+  label?: string;
+  severity?: 'low' | 'medium' | 'high' | string;
   message: string;
+  suggestion?: string;
+  failed_step_index?: number | null;
+  failed_step_no?: number | null;
 }
 
 interface RunSummary {
@@ -710,9 +715,10 @@ function App() {
     const set = new Set<string>();
     runs.forEach((r) => {
       const c = r.failure_reason?.category;
-      if (c) set.add(c);
+      const label = r.failure_reason?.label || c;
+      if (c) set.add(`${c}::${label}`);
     });
-    return Array.from(set).sort();
+    return Array.from(set).sort((a, b) => a.split('::')[1].localeCompare(b.split('::')[1]));
   }, [runs]);
 
   const visibleRuns = useMemo(() => {
@@ -1492,6 +1498,16 @@ function App() {
     }
   };
 
+  const getFailureLabel = (reason?: FailureReason | null) => reason?.label || reason?.category || '未知失败';
+
+  const getFailureSeverityClass = (severity?: string | null) => {
+    switch ((severity || '').toLowerCase()) {
+      case 'high': return 'border-rose-200 bg-rose-50 text-rose-700';
+      case 'medium': return 'border-amber-200 bg-amber-50 text-amber-700';
+      default: return 'border-zinc-200 bg-zinc-50 text-zinc-600';
+    }
+  };
+
   const isReplayMode = !!selectedRunId && !isRunning;
 
   const formatShotTime = (ms?: number) => {
@@ -1957,9 +1973,10 @@ function App() {
                         title="按失败原因过滤"
                       >
                         <option value="">全部</option>
-                        {runFailureCategories.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
+                        {runFailureCategories.map((entry) => {
+                          const [category, label] = entry.split('::');
+                          return <option key={category} value={category}>{label}</option>;
+                        })}
                       </select>
                     )}
                     <button
@@ -2016,8 +2033,8 @@ function App() {
                         <span className={`w-2 h-2 rounded-full shrink-0 ${r.status === 'completed' ? 'bg-emerald-500' : r.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'}`} />
                         <span className="truncate">{formatRunTime(r.started_at)} {formatStatus(r.status || 'running')}</span>
                         {r.status === 'failed' && r.failure_reason?.category && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded border border-rose-200 bg-rose-50 text-rose-700 font-mono">
-                            {r.failure_reason.category}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getFailureSeverityClass(r.failure_reason.severity)}`} title={r.failure_reason.message || r.failure_reason.category}>
+                            {getFailureLabel(r.failure_reason)}
                           </span>
                         )}
                       </div>
@@ -2417,10 +2434,18 @@ function App() {
                               Token消耗: <span className="text-zinc-900 font-mono">{formatTokenUsage(selectedRun.token_usage)}</span>
                             </div>
                             {selectedRun.status === 'failed' && selectedRun.failure_reason?.category && (
-                              <div className="text-xs text-zinc-500 mt-2">
-                                失败原因: <span className="text-rose-700 font-mono">{selectedRun.failure_reason.category}</span>
+                              <div className={`text-xs mt-2 rounded-xl border p-3 ${getFailureSeverityClass(selectedRun.failure_reason.severity)}`}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="font-semibold">{getFailureLabel(selectedRun.failure_reason)}</div>
+                                  {selectedRun.failure_reason.failed_step_no ? (
+                                    <div className="font-mono text-[10px]">步骤 {selectedRun.failure_reason.failed_step_no}</div>
+                                  ) : null}
+                                </div>
                                 {selectedRun.failure_reason.message ? (
-                                  <div className="mt-1 text-[11px] text-zinc-600 font-mono break-words">{selectedRun.failure_reason.message}</div>
+                                  <div className="mt-2 text-[11px] font-mono break-words leading-relaxed opacity-90">{selectedRun.failure_reason.message}</div>
+                                ) : null}
+                                {selectedRun.failure_reason.suggestion ? (
+                                  <div className="mt-2 text-[11px] leading-relaxed opacity-90">建议：{selectedRun.failure_reason.suggestion}</div>
                                 ) : null}
                               </div>
                             )}

@@ -35,11 +35,13 @@
 ## 核心组件交互链路
 
 1. **用例创建 (两种方式)**
-   - **手工录制**: 通过 `extension/` Chrome 插件，在页面上点击操作，插件会生成标准化 JSON 格式的测试步骤，并通过后端写入 SQLite（`tests/tester.db`）；同时会生成 `.bak` 备份到 `tests/recorded_cases/`。
+   - **手工录制**: 通过 `extension/` Chrome 插件，在页面上点击、输入、选择、勾选或触发 SPA 路由变化，插件会生成标准化 JSON steps；停止录制后通过 `/api/recorder/cases` 写入 SQLite（`tests/tester.db`），同步失败时下载 JSON 兜底。
    - **自然语言 (NL2Case)**: 在 `frontend/` 输入自然语言步骤，`web_server/` 调用 LLM 转换为标准化 JSON 步骤，但此时 `selector` 为空。
 
 2. **用例执行与动态编译**
-   - 用户在控制台点击运行，`web_server/app.py` 读取 JSON 用例，动态将其编译为可执行的 Playwright Python 脚本（运行时生成，默认不提交到仓库）。
+   - 用户在控制台点击运行，`web_server/app.py` 读取 JSON 用例，先合并 `variables` 与 `dataset` 行数据，再将 `${变量名}` 替换到 `start_url`、`selector`、`intent`、`value`、`url` 等字段。
+   - 执行时会注入内置运行时变量，例如 `${today_ymd}`（`YYMMDD` 日期验证码）、`${today_yyyyMMdd}`、`${today_mmdd}`。
+   - 后端动态将用例编译为可执行的 Playwright Python 脚本（运行时生成，默认不提交到仓库）。
    - 通过 `subprocess` 启动该脚本，并通过 WebSocket 将 stdout/stderr 日志和实时 base64 截图推送回前端展示。
 
 3. **AI 自愈机制 (Self-Healing)**
