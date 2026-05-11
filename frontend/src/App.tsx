@@ -1316,10 +1316,15 @@ function App() {
       const updated = res.data?.case;
       if (updated?.id) {
         setSelectedCase(updated);
+        setCaseDoc(updated);
+        setSelectedRunId(null);
+        setSelectedRun(null);
+        fetchRuns(updated.id);
       }
-      setLogs((prev) => [...prev, `✅ 已重命名为 ${next}`]);
+      setLogs((prev) => [...prev, `✅ 已重命名为 ${updated?.name || next}`]);
     } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ 重命名失败: ${e.message}`]);
+      const msg = e.response?.data?.error || e.response?.data?.detail?.error || e.response?.data?.detail || e.message;
+      setLogs((prev) => [...prev, `❌ 重命名失败: ${msg}`]);
     }
   };
 
@@ -1478,6 +1483,14 @@ function App() {
     return `${hh}:${mm}:${ss}`;
   };
 
+  const formatRunDate = (ts?: number | null) => {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${month}-${day}`;
+  };
+
   const formatTokenUsage = (u?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null) => {
     if (!u) return '';
     const t = u.total_tokens ?? 0;
@@ -1502,9 +1515,32 @@ function App() {
 
   const getFailureSeverityClass = (severity?: string | null) => {
     switch ((severity || '').toLowerCase()) {
-      case 'high': return 'border-rose-200 bg-rose-50 text-rose-700';
-      case 'medium': return 'border-amber-200 bg-amber-50 text-amber-700';
-      default: return 'border-zinc-200 bg-zinc-50 text-zinc-600';
+      case 'high': return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/35 dark:bg-rose-500/10 dark:text-rose-200';
+      case 'medium': return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-200';
+      default: return 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300';
+    }
+  };
+
+  const getFailureSeverityTone = (severity?: string | null) => {
+    switch ((severity || '').toLowerCase()) {
+      case 'high': return {
+        card: 'border-rose-200/80 bg-gradient-to-br from-rose-50 via-white to-white shadow-[0_18px_45px_rgba(225,29,72,0.08)] dark:border-rose-500/30 dark:from-rose-950/30 dark:via-zinc-950 dark:to-zinc-950',
+        icon: 'bg-rose-100 text-rose-700 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:ring-rose-500/25',
+        badge: 'border-rose-200 bg-white/80 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200',
+        code: 'border-rose-100 bg-white/70 text-rose-900 dark:border-rose-500/20 dark:bg-black/20 dark:text-rose-100',
+      };
+      case 'medium': return {
+        card: 'border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-white shadow-[0_18px_45px_rgba(217,119,6,0.08)] dark:border-amber-500/30 dark:from-amber-950/30 dark:via-zinc-950 dark:to-zinc-950',
+        icon: 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/25',
+        badge: 'border-amber-200 bg-white/80 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
+        code: 'border-amber-100 bg-white/70 text-amber-900 dark:border-amber-500/20 dark:bg-black/20 dark:text-amber-100',
+      };
+      default: return {
+        card: 'border-zinc-200 bg-gradient-to-br from-zinc-50 via-white to-white shadow-[0_18px_45px_rgba(24,24,27,0.05)] dark:border-zinc-700 dark:from-zinc-900 dark:via-zinc-950 dark:to-zinc-950',
+        icon: 'bg-zinc-100 text-zinc-600 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700',
+        badge: 'border-zinc-200 bg-white/80 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300',
+        code: 'border-zinc-200 bg-white/70 text-zinc-700 dark:border-zinc-700 dark:bg-black/20 dark:text-zinc-200',
+      };
     }
   };
 
@@ -2006,21 +2042,25 @@ function App() {
                 <div className="space-y-1 px-2 pb-2">
                   {visibleRuns.length === 0 ? (
                     <div className="text-xs text-zinc-600 px-2 py-2">无匹配记录</div>
-                  ) : visibleRuns.map((r) => (
+                  ) : visibleRuns.map((r) => {
+                    const statusText = formatStatus(r.status || 'running');
+                    const durationText = r.duration_ms ? `${Math.round(r.duration_ms / 1000)}s` : '';
+                    const tokenText = formatTokenUsage(r.token_usage);
+                    return (
                     <div
                       key={r.id}
                       onClick={() => (runSelectMode ? toggleRunSelected(r.id) : loadRunDetail(r.id))}
-                      className={`group w-full flex items-center justify-between gap-2 px-2 py-2 rounded-md border text-xs cursor-pointer ${
+                      className={`group w-full rounded-xl border text-xs cursor-pointer px-3 py-2.5 transition-all ${
                         selectedRunId === r.id
-                          ? 'bg-[#10a37f]/10 border-[#10a37f]/25 text-zinc-900'
-                          : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900'
+                          ? 'bg-[#10a37f]/10 border-[#10a37f]/30 text-zinc-900 shadow-sm'
+                          : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 hover:border-zinc-300'
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-start gap-2 min-w-0">
                         {runSelectMode && (
                           <button
                             onClick={(e) => { e.stopPropagation(); toggleRunSelected(r.id); }}
-                            className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                            className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 ${
                               selectedRunIdSet.has(r.id)
                                 ? 'bg-[#10a37f] border-[#10a37f]'
                                 : 'bg-white border-zinc-300 hover:border-zinc-400'
@@ -2030,29 +2070,49 @@ function App() {
                             {selectedRunIdSet.has(r.id) && <Check className="w-3 h-3 text-white" />}
                           </button>
                         )}
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${r.status === 'completed' ? 'bg-emerald-500' : r.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'}`} />
-                        <span className="truncate">{formatRunTime(r.started_at)} {formatStatus(r.status || 'running')}</span>
-                        {r.status === 'failed' && r.failure_reason?.category && (
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getFailureSeverityClass(r.failure_reason.severity)}`} title={r.failure_reason.message || r.failure_reason.category}>
-                            {getFailureLabel(r.failure_reason)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[10px] text-zinc-500 font-mono">{formatTokenUsage(r.token_usage)}</span>
-                        <span className="text-[10px] text-zinc-500">{r.duration_ms ? `${Math.round(r.duration_ms / 1000)}s` : ''}</span>
-                        {!runSelectMode && (
-                          <button
-                            onClick={(e) => handleDeleteRun(e, r.id)}
-                            className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-rose-700 transition-opacity p-0.5 rounded"
-                            title="删除记录"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
+                        <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${r.status === 'completed' ? 'bg-emerald-500' : r.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <div className="font-mono text-[12px] leading-5 text-zinc-900 dark:text-zinc-100 whitespace-nowrap tabular-nums">
+                              {formatRunDate(r.started_at)} {formatRunTime(r.started_at)}
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className={`text-[10px] leading-4 px-1.5 py-0.5 rounded-full border font-medium whitespace-nowrap ${r.status === 'completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200' : r.status === 'failed' ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200' : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'}`}>
+                                {statusText}
+                              </span>
+                              {!runSelectMode && (
+                                <button
+                                  onClick={(e) => handleDeleteRun(e, r.id)}
+                                  className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-rose-700 transition-opacity p-0.5 rounded shrink-0"
+                                  title="删除记录"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-1 flex items-center gap-1.5 min-w-0 overflow-hidden">
+                            {r.status === 'failed' && r.failure_reason?.category && (
+                              <span className={`shrink min-w-0 max-w-[120px] truncate text-[10px] leading-4 px-1.5 py-0.5 rounded-full border font-medium ${getFailureSeverityClass(r.failure_reason.severity)}`} title={r.failure_reason.message || r.failure_reason.category}>
+                                {getFailureLabel(r.failure_reason)}
+                              </span>
+                            )}
+                            {durationText && (
+                              <span className="shrink-0 text-[10px] leading-4 px-1.5 py-0.5 rounded-full border border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
+                                {durationText}
+                              </span>
+                            )}
+                            {tokenText && (
+                              <span className="min-w-0 truncate text-[10px] leading-4 px-1.5 py-0.5 rounded-full border border-zinc-200 bg-zinc-50 text-zinc-500 font-mono dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400" title={tokenText}>
+                                {tokenText}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -2433,22 +2493,38 @@ function App() {
                             <div className="text-xs text-zinc-500">
                               Token消耗: <span className="text-zinc-900 font-mono">{formatTokenUsage(selectedRun.token_usage)}</span>
                             </div>
-                            {selectedRun.status === 'failed' && selectedRun.failure_reason?.category && (
-                              <div className={`text-xs mt-2 rounded-xl border p-3 ${getFailureSeverityClass(selectedRun.failure_reason.severity)}`}>
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="font-semibold">{getFailureLabel(selectedRun.failure_reason)}</div>
-                                  {selectedRun.failure_reason.failed_step_no ? (
-                                    <div className="font-mono text-[10px]">步骤 {selectedRun.failure_reason.failed_step_no}</div>
-                                  ) : null}
+                            {selectedRun.status === 'failed' && selectedRun.failure_reason?.category && (() => {
+                              const tone = getFailureSeverityTone(selectedRun.failure_reason.severity);
+                              return (
+                                <div className={`mt-3 rounded-2xl border p-4 overflow-hidden relative ${tone.card}`}>
+                                  <div className="absolute inset-y-0 left-0 w-1 bg-current opacity-25" />
+                                  <div className="flex items-start gap-3">
+                                    <div className={`mt-0.5 w-8 h-8 rounded-2xl ring-1 flex items-center justify-center shrink-0 ${tone.icon}`}>
+                                      <AlertTriangle className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50 leading-5">{getFailureLabel(selectedRun.failure_reason)}</div>
+                                          <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">系统已根据日志自动识别失败类型</div>
+                                        </div>
+                                        {selectedRun.failure_reason.failed_step_no ? (
+                                          <div className={`shrink-0 text-[11px] px-2 py-1 rounded-full border font-mono ${tone.badge}`}>步骤 {selectedRun.failure_reason.failed_step_no}</div>
+                                        ) : null}
+                                      </div>
+                                      {selectedRun.failure_reason.message ? (
+                                        <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] font-mono break-words leading-relaxed ${tone.code}`}>{selectedRun.failure_reason.message}</div>
+                                      ) : null}
+                                      {selectedRun.failure_reason.suggestion ? (
+                                        <div className="mt-3 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300">
+                                          <span className="font-semibold text-zinc-900 dark:text-zinc-100">建议：</span>{selectedRun.failure_reason.suggestion}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
                                 </div>
-                                {selectedRun.failure_reason.message ? (
-                                  <div className="mt-2 text-[11px] font-mono break-words leading-relaxed opacity-90">{selectedRun.failure_reason.message}</div>
-                                ) : null}
-                                {selectedRun.failure_reason.suggestion ? (
-                                  <div className="mt-2 text-[11px] leading-relaxed opacity-90">建议：{selectedRun.failure_reason.suggestion}</div>
-                                ) : null}
-                              </div>
-                            )}
+                              );
+                            })()}
                           </div>
 
                           <div className="pt-2 border-t border-zinc-200">

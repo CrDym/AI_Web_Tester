@@ -1356,19 +1356,28 @@ async def update_case(case_id: str, request: Request):
 @app.post("/api/cases/{case_id}/rename")
 async def rename_case(case_id: str, request: Request):
     data = await request.json()
-    new_name = str(data.get("new_name") or "").strip()
+    raw_name = data.get("new_name") if data.get("new_name") is not None else data.get("name")
+    new_name = _safe_case_name(str(raw_name or ""))
     if not new_name:
-        return JSONResponse({"error": "Name cannot be empty"}, status_code=400)
+        return JSONResponse({"error": "用例名称不能为空"}, status_code=400)
+    if new_name.endswith(".json"):
+        new_name = new_name[:-5]
+    new_case_id = f"{new_name}.json"
     db = SessionLocal()
     try:
         c = db.query(CaseModel).filter_by(id=case_id).first()
         if not c:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
+            return JSONResponse({"error": "用例不存在"}, status_code=404)
+        if new_case_id != case_id and db.query(CaseModel).filter_by(id=new_case_id).first():
+            return JSONResponse({"error": "同名用例已存在"}, status_code=409)
         _write_case_backup_file(case_id, _case_doc_from_model(c))
+        old_case_id = c.id
+        c.id = new_case_id
         c.name = new_name
         c.updated_at = int(time.time())
         db.commit()
-        return JSONResponse({"status": "success"})
+        _update_suites_case_ref(old_case_id, new_case_id)
+        return JSONResponse({"status": "success", "case": _case_doc_from_model(c)})
     finally:
         db.close()
 
