@@ -1123,13 +1123,135 @@ def _validate_case_placeholders_or_raise(case_doc: Dict[str, Any]) -> None:
             "locations": locs[:50],
         })
 
-def _create_case_from_payload(data: Dict[str, Any]) -> JSONResponse:
+def _step_key(step: Any) -> str:
+    if not isinstance(step, dict):
+        return ""
+    return "|".join([
+        str(step.get("type") or ""),
+        str(step.get("selector") or ""),
+        str(step.get("value") or ""),
+        str(step.get("assert_type") or ""),
+    ])
+
+def _is_short_wait_step(step: Any) -> bool:
+    if not isinstance(step, dict) or step.get("type") != "wait":
+        return False
+    try:
+        return int(str(step.get("value") or "0")) < 300
+    except Exception:
+        return False
+
+def _merge_step_meta(step: Dict[str, Any], rules: List[str]) -> Dict[str, Any]:
+    next_step = dict(step)
+    meta = next_step.get("meta") if isinstance(next_step.get("meta"), dict) else {}
+    existing = meta.get("normalized_rules") if isinstance(meta.get("normalized_rules"), list) else []
+    meta["normalized"] = True
+    meta["normalized_rules"] = sorted(set([*existing, *rules]))
+    next_step["meta"] = meta
+    return next_step
+
+def _normalize_recorded_steps(steps: Any) -> Dict[str, Any]:
+    if not isinstance(steps, list):
+        return {"steps": [], "summary": {"original_count": 0, "normalized_count": 0, "removed_count": 0, "rules": []}}
+
+    cleaned: List[Dict[str, Any]] = []
+    rules_used = set()
+    removed_count = 0
+
+    for raw in steps:
+        if not isinstance(raw, dict):
+            removed_count += 1
+            rules_used.add("drop_invalid_step")
+            continue
+        step = dict(raw)
+        step_type = step.get("type")
+
+        if _is_short_wait_step(step):
+            removed_count += 1
+            rules_used.add("drop_short_wait")
+            continue
+
+        if cleaned:
+            prev = cleaned[-1]
+            same_selector = (prev.get("selector") or "") == (step.get("selector") or "")
+            same_url = (prev.get("url") or "") == (step.get("url") or "")
+
+            if step_type == "input" and prev.get("type") == "input" and same_selector:
+                merged = _merge_step_meta(step, ["merge_consecutive_input"])
+                cleaned[-1] = merged
+                rules_used.add("merge_consecutive_input")
+                removed_count += 1
+                continue
+
+            if step_type == "click" and prev.get("type") == "click" and _step_key(prev) == _step_key(step):
+                cleaned[-1] = _merge_step_meta(prev, ["drop_duplicate_click"])
+                rules_used.add("drop_duplicate_click")
+                removed_count += 1
+                continue
+
+            if step_type == "wait" and prev.get("type") == "wait":
+                try:
+                    prev_value = int(str(prev.get("value") or "0"))
+                    next_value = int(str(step.get("value") or "0"))
+                    merged_wait = dict(prev)
+                    merged_wait["value"] = str(max(prev_value, next_value))
+                    cleaned[-1] = _merge_step_meta(merged_wait, ["merge_consecutive_wait"])
+                    rules_used.add("merge_consecutive_wait")
+                    removed_count += 1
+                    continue
+                except Exception:
+                    pass
+
+            if step_type == "assert" and step.get("assert_type") == "url" and prev.get("type") == "assert" and prev.get("assert_type") == "url" and prev.get("value") == step.get("value"):
+                cleaned[-1] = _merge_step_meta(prev, ["drop_duplicate_url_assert"])
+                rules_used.add("drop_duplicate_url_assert")
+                removed_count += 1
+                continue
+
+            if step_type == "wait" and prev.get("type") == "assert" and prev.get("assert_type") == "url" and same_url:
+                removed_count += 1
+                rules_used.add("drop_wait_after_url_assert")
+                continue
+
+        cleaned.append(step)
+
+    for idx in range(1, len(cleaned)):
+        prev = cleaned[idx - 1]
+        step = cleaned[idx]
+        if prev.get("type") == "wait" and step.get("type") == "assert" and step.get("assert_type") == "url" and (prev.get("url") or "") == (step.get("url") or ""):
+            cleaned[idx - 1] = _merge_step_meta(prev, ["normalize_spa_navigation_wait"])
+            cleaned[idx] = _merge_step_meta(step, ["normalize_spa_navigation_assert"])
+            rules_used.add("normalize_spa_navigation")
+
+    return {
+        "steps": cleaned,
+        "summary": {
+            "original_count": len(steps),
+            "normalized_count": len(cleaned),
+            "removed_count": removed_count,
+            "rules": sorted(rules_used),
+        }
+    }
+
+def _create_case_from_payload(data: Dict[str, Any], normalize_recorded: bool = False) -> JSONResponse:
     name = _safe_case_name(data.get("name") or f"case_{int(time.time())}")
     case_id = f"{name}.json"
 
+    tags = data.get("tags", [])
+    steps = data.get("steps", [])
+    recorder_normalize_summary = None
+    if normalize_recorded:
+        normalized = _normalize_recorded_steps(steps)
+        steps = normalized["steps"]
+        recorder_normalize_summary = normalized["summary"]
+        tag_set = set(tags if isinstance(tags, list) else [])
+        tag_set.add("auto_generated")
+        tag_set.add("normalized")
+        tags = sorted(tag_set)
+
     _validate_case_placeholders_or_raise({
         "start_url": data.get("start_url"),
-        "steps": data.get("steps", []),
+        "steps": steps,
         "variables": data.get("variables", {}),
         "dataset": data.get("dataset", []),
     })
@@ -1148,8 +1270,8 @@ def _create_case_from_payload(data: Dict[str, Any]) -> JSONResponse:
             name=final_name,
             type="json",
             start_url=data.get("start_url"),
-            steps=json.dumps(data.get("steps", [])),
-            tags=json.dumps(data.get("tags", [])),
+            steps=json.dumps(steps),
+            tags=json.dumps(tags),
             variables=json.dumps(data.get("variables", {})),
             dataset=json.dumps(data.get("dataset", [])),
             created_at=int(time.time()),
@@ -1157,14 +1279,17 @@ def _create_case_from_payload(data: Dict[str, Any]) -> JSONResponse:
         )
         db.add(new_case)
         db.commit()
-        return JSONResponse({"status": "success", "id": final_case_id})
+        response = {"status": "success", "id": final_case_id}
+        if recorder_normalize_summary is not None:
+            response["normalized"] = recorder_normalize_summary
+        return JSONResponse(response)
     finally:
         db.close()
 
 @app.post("/api/recorder/cases")
 async def create_case_from_recorder(request: Request):
     data = await request.json()
-    return _create_case_from_payload(data)
+    return _create_case_from_payload(data, normalize_recorded=True)
 
 @app.post("/api/cases")
 async def create_case(request: Request):

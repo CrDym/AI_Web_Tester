@@ -131,7 +131,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json().catch(() => ({}));
             lastSyncedCaseId = data.id || null;
-            setSyncStatus(`同步成功：${lastSyncedCaseId || defaultFileName}。控制台页面刷新后可见。`, 'success');
+            const normalized = data.normalized;
+            const normalizedText = normalized && typeof normalized.removed_count === 'number'
+                ? ` 已自动整理：${normalized.original_count} 步 → ${normalized.normalized_count} 步。`
+                : '';
+            setSyncStatus(`同步成功：${lastSyncedCaseId || defaultFileName}。${normalizedText}控制台页面刷新后可见。`, 'success');
             chrome.tabs.create({ url: CONSOLE_URL });
         } catch (e) {
             console.error('同步失败，降级为下载文件', e);
