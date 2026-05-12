@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { AlertTriangle, Play, FileJson, Terminal, SquareTerminal, RefreshCw, XCircle, Plus, Save, Pencil, Trash2, History, RotateCw, Settings, MonitorPlay, Loader2, Search, Tag, Eye, Activity, ZoomIn, ZoomOut, UserRound, KeyRound, ListChecks, Check, Sun, Moon } from 'lucide-react';
+import { AlertTriangle, Play, FileJson, Terminal, SquareTerminal, RefreshCw, XCircle, Plus, Save, Pencil, Trash2, History, RotateCw, Settings, MonitorPlay, Loader2, Search, Tag, Eye, Activity, ZoomIn, ZoomOut, UserRound, KeyRound, ListChecks, Check, Sun, Moon, Folder, FolderOpen } from 'lucide-react';
 import axios from 'axios';
 import CodeBlock from './components/CodeBlock';
 import DatasetEditor from './components/DatasetEditor';
@@ -8,6 +8,8 @@ interface TestCase {
   id: string;
   name: string;
   type: string;
+  group_name?: string;
+  aliases?: string[];
   tags?: string[];
   updated_at?: number;
 }
@@ -223,6 +225,7 @@ function App() {
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [lastSaved, setLastSaved] = useState<string>('');
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [allRuns, setAllRuns] = useState<RunSummary[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [runFailureFilter, setRunFailureFilter] = useState<string>('');
   const [runSelectMode, setRunSelectMode] = useState(false);
@@ -277,16 +280,26 @@ function App() {
   // 新增用例搜索与过滤状态
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [caseSelectMode, setCaseSelectMode] = useState(false);
+  const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
   const [fixSuggestLoading, setFixSuggestLoading] = useState(false);
   const [applyFixLoading, setApplyFixLoading] = useState(false);
 
   const selectedRunIdSet = useMemo(() => new Set(selectedRunIds), [selectedRunIds]);
+  const selectedCaseIdSet = useMemo(() => new Set(selectedCaseIds), [selectedCaseIds]);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setRunSelectMode(false);
     setSelectedRunIds([]);
   }, [selectedCase?.id]);
+
+  useEffect(() => {
+    if (sidebarNav === 'runs' && !selectedCase && allRuns.length === 0 && authUser) {
+      fetchAllRuns();
+    }
+  }, [sidebarNav, selectedCase?.id, authUser]);
 
   const scrollSidebarTo = (key: 'cases' | 'suites' | 'runs') => {
     if (key !== 'runs') {
@@ -407,6 +420,7 @@ function App() {
     setSelectedRunId(null);
     setSelectedRun(null);
     setRuns([]);
+    setAllRuns([]);
     setSuiteRuns([]);
     setSelectedSuiteId(null);
     setSuiteDoc(null);
@@ -647,7 +661,8 @@ function App() {
         OPENAI_API_KEY: apiKey,
         OPENAI_MODEL_NAME: modelName
       });
-      await axios.post('/api/environments', envs);
+      const envRes = await axios.post('/api/environments', envs);
+      if (Array.isArray(envRes.data?.environments)) setEnvs(envRes.data.environments);
       for (const [filename, content] of Object.entries(prompts)) {
         await axios.put(`/api/prompts/${filename}`, { content });
       }
@@ -684,6 +699,7 @@ function App() {
     if (!authReady || !authUser) return;
     fetchCases();
     fetchSuites();
+    fetchAllRuns();
     loadSettings();
   }, [authReady, authUser]);
 
@@ -694,16 +710,73 @@ function App() {
     }
     const q = caseQuery.trim().toLowerCase();
     if (q) {
-      result = result.filter((c) => (c.name || '').toLowerCase().includes(q) || (c.id || '').toLowerCase().includes(q));
+      result = result.filter((c) => (c.name || '').toLowerCase().includes(q) || (c.id || '').toLowerCase().includes(q) || (c.group_name || '').toLowerCase().includes(q));
     }
     return result;
   }, [cases, caseQuery, selectedTag]);
 
-  const fetchRuns = async (caseId: string) => {
+  const caseGroups = useMemo(() => {
+    const map = new Map<string, TestCase[]>();
+    filteredCases.forEach((c) => {
+      const group = (c.group_name || '').trim() || '未分组';
+      if (!map.has(group)) map.set(group, []);
+      map.get(group)!.push(c);
+    });
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      if (a === '未分组') return 1;
+      if (b === '未分组') return -1;
+      return a.localeCompare(b, 'zh-Hans-CN');
+    });
+  }, [filteredCases]);
+
+  const allGroups = useMemo(() => {
+    const groups = new Set<string>();
+    cases.forEach((c) => {
+      const g = (c.group_name || '').trim();
+      if (g) groups.add(g);
+    });
+    return Array.from(groups).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  }, [cases]);
+
+  const fetchAllRuns = async () => {
+    setRunsLoading(true);
+    try {
+      const res = await axios.get('/api/runs', { params: { include_all: true } });
+      setAllRuns(res.data || []);
+    } catch (e) {
+      setAllRuns([]);
+    } finally {
+      setRunsLoading(false);
+    }
+  };
+
+  const fetchRuns = async (caseId: string, currentCase?: TestCase | null) => {
+    const targetCase = currentCase || selectedCase;
     setRunsLoading(true);
     try {
       const res = await axios.get('/api/runs', { params: { case_id: caseId } });
-      setRuns(res.data || []);
+      let nextRuns = res.data || [];
+      const allRes = (!nextRuns || nextRuns.length === 0 || targetCase) ? await axios.get('/api/runs', { params: { include_all: true } }) : null;
+      if ((!nextRuns || nextRuns.length === 0) && targetCase) {
+        const ids = new Set([targetCase.id, targetCase.name, ...(targetCase.aliases || [])]);
+        const expanded = new Set<string>();
+        ids.forEach((id) => {
+          if (!id) return;
+          expanded.add(id);
+          if (id.endsWith('.json')) expanded.add(id.slice(0, -5));
+          else expanded.add(`${id}.json`);
+        });
+        nextRuns = (allRes?.data || []).filter((r: RunSummary) => r.case_id && expanded.has(r.case_id));
+      }
+      if ((!nextRuns || nextRuns.length === 0) && targetCase && targetCase.name.includes('浏览器录制')) {
+        nextRuns = (allRes?.data || []).filter((r: RunSummary) => (r.case_id || '').startsWith('case_'));
+      }
+      setRuns(nextRuns || []);
+      setAllRuns((prev) => {
+        const map = new Map<string, RunSummary>();
+        [...prev, ...(nextRuns || [])].forEach((r) => map.set(r.id, r));
+        return Array.from(map.values()).sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+      });
     } catch (e) {
       setRuns([]);
     } finally {
@@ -711,20 +784,22 @@ function App() {
     }
   };
 
+  const runSource = selectedCase ? runs : allRuns;
+
   const runFailureCategories = useMemo(() => {
     const set = new Set<string>();
-    runs.forEach((r) => {
+    runSource.forEach((r) => {
       const c = r.failure_reason?.category;
       const label = r.failure_reason?.label || c;
       if (c) set.add(`${c}::${label}`);
     });
     return Array.from(set).sort((a, b) => a.split('::')[1].localeCompare(b.split('::')[1]));
-  }, [runs]);
+  }, [runSource]);
 
   const visibleRuns = useMemo(() => {
-    if (!runFailureFilter) return runs;
-    return runs.filter((r) => (r.failure_reason?.category || '') === runFailureFilter);
-  }, [runs, runFailureFilter]);
+    if (!runFailureFilter) return runSource;
+    return runSource.filter((r) => (r.failure_reason?.category || '') === runFailureFilter);
+  }, [runSource, runFailureFilter]);
 
   const handleDeleteSuiteRun = async (e: React.MouseEvent, runId: string) => {
     e.stopPropagation();
@@ -762,6 +837,7 @@ function App() {
     if (!ok) return;
     try {
       await axios.delete(`/api/runs/${runId}`);
+      setAllRuns((prev) => prev.filter((r) => r.id !== runId));
       if (selectedRunId === runId) {
         setSelectedRunId(null);
         setSelectedRun(null);
@@ -770,7 +846,9 @@ function App() {
         setSelectedShotFile(null);
       }
       if (selectedCase) {
-        fetchRuns(selectedCase.id);
+        fetchRuns(selectedCase.id, selectedCase);
+      } else {
+        fetchAllRuns();
       }
     } catch (err: any) {
       alert('删除失败: ' + (err.response?.data?.error || err.message));
@@ -805,6 +883,7 @@ function App() {
     if (!ok) return;
     try {
       await axios.post('/api/runs/batch_delete', { run_ids: selectedRunIds });
+      setAllRuns((prev) => prev.filter((r) => !selectedRunIdSet.has(r.id)));
       if (selectedRunId && selectedRunIdSet.has(selectedRunId)) {
         setSelectedRunId(null);
         setSelectedRun(null);
@@ -813,7 +892,9 @@ function App() {
         setSelectedShotFile(null);
       }
       if (selectedCase) {
-        fetchRuns(selectedCase.id);
+        fetchRuns(selectedCase.id, selectedCase);
+      } else {
+        fetchAllRuns();
       }
       exitRunSelectMode();
     } catch (err: any) {
@@ -831,6 +912,7 @@ function App() {
         if (!okFallback) return;
         const results = await Promise.allSettled(selectedRunIds.map((rid) => axios.delete(`/api/runs/${rid}`)));
         const failedCount = results.filter((r) => r.status === 'rejected').length;
+        setAllRuns((prev) => prev.filter((r) => !selectedRunIdSet.has(r.id)));
         if (selectedRunId && selectedRunIdSet.has(selectedRunId)) {
           setSelectedRunId(null);
           setSelectedRun(null);
@@ -839,7 +921,9 @@ function App() {
           setSelectedShotFile(null);
         }
         if (selectedCase) {
-          fetchRuns(selectedCase.id);
+          fetchRuns(selectedCase.id, selectedCase);
+        } else {
+          fetchAllRuns();
         }
         exitRunSelectMode();
         if (failedCount > 0) {
@@ -920,7 +1004,7 @@ function App() {
       return axios.get(`/api/cases/${selectedCase.id}/script`);
     }).then(res => {
       setScriptContent(res.data.content || '');
-      fetchRuns(selectedCase.id);
+      fetchRuns(selectedCase.id, selectedCase);
       if (pending) {
         loadRunDetail(pending.run_id).finally(() => setPendingRunToOpen(null));
       } else {
@@ -1096,7 +1180,7 @@ function App() {
             setLogs(prev => [...prev, `🏁 执行结束，状态: ${formatStatus(data.status)}`]);
             ws.close();
             if (selectedCase) {
-              fetchRuns(selectedCase.id);
+              fetchRuns(selectedCase.id, selectedCase);
             }
             loadRunDetail(runId);
           }
@@ -1319,7 +1403,7 @@ function App() {
         setCaseDoc(updated);
         setSelectedRunId(null);
         setSelectedRun(null);
-        fetchRuns(updated.id);
+        fetchRuns(updated.id, updated);
       }
       setLogs((prev) => [...prev, `✅ 已重命名为 ${updated?.name || next}`]);
     } catch (e: any) {
@@ -1397,6 +1481,37 @@ function App() {
     } finally {
       setApplyFixLoading(false);
     }
+  };
+
+  const handleMoveCasesToGroup = async (caseIds: string[], currentGroup?: string) => {
+    if (caseIds.length === 0) return;
+    const input = await promptAction({
+      title: caseIds.length > 1 ? '批量移动分组' : '移动用例分组',
+      description: allGroups.length > 0 ? `已有分组：${allGroups.join('、')}。留空则移动到未分组。` : '输入新的分组名称，留空则移动到未分组。',
+      placeholder: '例如：登录模块',
+      initialValue: currentGroup || '',
+      confirmText: '移动'
+    });
+    if (input === null) return;
+    const groupName = input.trim();
+    try {
+      await axios.post('/api/cases/batch_group', { case_ids: caseIds, group_name: groupName });
+      await fetchCases();
+      if (selectedCase && caseIds.includes(selectedCase.id)) {
+        const refreshed = await axios.get(`/api/cases/${selectedCase.id}`);
+        setSelectedCase(refreshed.data);
+        setCaseDoc(refreshed.data);
+      }
+      setSelectedCaseIds([]);
+      setCaseSelectMode(false);
+      setLogs((prev) => [...prev, `✅ 已移动 ${caseIds.length} 个用例到 ${groupName || '未分组'}`]);
+    } catch (e: any) {
+      setLogs((prev) => [...prev, `❌ 移动分组失败: ${e.response?.data?.error || e.message}`]);
+    }
+  };
+
+  const toggleCaseSelected = (caseId: string) => {
+    setSelectedCaseIds((prev) => prev.includes(caseId) ? prev.filter((x) => x !== caseId) : [...prev, caseId]);
   };
 
   const handleDeleteCase = async (c?: TestCase) => {
@@ -1789,9 +1904,18 @@ function App() {
                 <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
                   普通用例
                 </div>
-                <button onClick={fetchCases} className="p-1 hover:bg-zinc-100 rounded-md text-zinc-500 hover:text-zinc-900 transition" title="刷新用例">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => { setCaseSelectMode(!caseSelectMode); setSelectedCaseIds([]); }}
+                    className={`px-2 py-1 rounded-lg text-[11px] border transition-colors ${caseSelectMode ? 'bg-[#10a37f]/10 border-[#10a37f]/25 text-[#0e8a6a]' : 'border-zinc-200 text-zinc-500 hover:bg-zinc-100'}`}
+                    title="批量选择用例"
+                  >
+                    {caseSelectMode ? '取消' : '批量'}
+                  </button>
+                  <button onClick={fetchCases} className="p-1 hover:bg-zinc-100 rounded-md text-zinc-500 hover:text-zinc-900 transition" title="刷新用例">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               <div className="mb-3 space-y-2">
@@ -1826,75 +1950,117 @@ function App() {
                 )}
               </div>
 
-              <ul className="rounded-xl border border-zinc-200 divide-y divide-zinc-200 bg-white">
-                {filteredCases.map((c) => (
-                  <li key={c.id} className="stagger-item">
-                    <div
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
-                        selectedCase?.id === c.id
-                          ? 'bg-[#10a37f]/10 text-zinc-900'
-                          : 'text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900'
-                      }`}
-                    >
+              {caseSelectMode && (
+                <div className="mb-3 rounded-xl border border-[#10a37f]/20 bg-[#10a37f]/5 p-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-[#0e8a6a]">已选择 {selectedCaseIds.length} 个用例</span>
+                  <button
+                    onClick={() => handleMoveCasesToGroup(selectedCaseIds)}
+                    disabled={selectedCaseIds.length === 0}
+                    className="px-2.5 py-1 rounded-lg bg-[#10a37f] text-white text-[11px] disabled:opacity-40"
+                  >
+                    移动分组
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {caseGroups.map(([group, groupCases]) => {
+                  const collapsed = !!collapsedGroups[group];
+                  return (
+                    <div key={group} className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
                       <button
-                        onClick={() => { setSelectedSuiteId(null); setSuiteDoc(null); setSelectedSuiteRunId(null); setSelectedSuiteRun(null); setSelectedCase(c); }}
-                        className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                        onClick={() => setCollapsedGroups((prev) => ({ ...prev, [group]: !prev[group] }))}
+                        className="w-full px-3 py-2 bg-zinc-50 hover:bg-zinc-100 flex items-center justify-between text-left transition-colors"
                       >
-                        <FileJson className="w-4 h-4 opacity-70 shrink-0" />
-                        <div className="flex flex-col min-w-0">
-                          <span className="truncate">{c.name}</span>
-                          {c.tags && c.tags.length > 0 && (
-                            <div className="flex gap-1 mt-0.5">
-                              {c.tags.slice(0, 3).map(tag => (
-                                <span key={tag} className="text-[9px] bg-zinc-100 text-zinc-600 px-1 rounded-sm border border-zinc-200">{tag}</span>
-                              ))}
-                              {c.tags.length > 3 && <span className="text-[9px] text-zinc-500">+{c.tags.length - 3}</span>}
-                            </div>
-                          )}
+                        <div className="flex items-center gap-2 min-w-0">
+                          {collapsed ? <Folder className="w-4 h-4 text-zinc-500 shrink-0" /> : <FolderOpen className="w-4 h-4 text-[#10a37f] shrink-0" />}
+                          <span className="text-xs font-semibold text-zinc-700 truncate">{group}</span>
                         </div>
+                        <span className="text-[10px] text-zinc-500 bg-white border border-zinc-200 rounded-full px-1.5 py-0.5">{groupCases.length}</span>
                       </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleEditTags(c); }}
-                        className={`p-1.5 rounded-md border transition-colors ${
-                          selectedCase?.id === c.id
-                            ? 'border-[#10a37f]/25 bg-[#10a37f]/10 text-[#0e8a6a]'
-                            : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 text-zinc-500'
-                        }`}
-                        title="编辑标签"
-                      >
-                        <Tag className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleRename(c); }}
-                        className={`p-1.5 rounded-md border transition-colors ${
-                          selectedCase?.id === c.id
-                            ? 'border-[#10a37f]/25 bg-[#10a37f]/10 text-[#0e8a6a]'
-                            : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 text-zinc-500'
-                        }`}
-                        title="改名"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteCase(c); }}
-                        className={`p-1.5 rounded-md border transition-colors ${
-                          selectedCase?.id === c.id
-                            ? 'border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700'
-                            : 'border-transparent hover:border-rose-200 hover:bg-rose-50 text-zinc-500 hover:text-rose-700'
-                        }`}
-                        title="删除"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {!collapsed && (
+                        <ul className="divide-y divide-zinc-100">
+                          {groupCases.map((c) => (
+                            <li key={c.id} className="stagger-item">
+                              <div
+                                className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                                  selectedCase?.id === c.id
+                                    ? 'bg-[#10a37f]/10 text-zinc-900'
+                                    : 'text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900'
+                                }`}
+                              >
+                                {caseSelectMode && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggleCaseSelected(c.id); }}
+                                    className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${selectedCaseIdSet.has(c.id) ? 'bg-[#10a37f] border-[#10a37f]' : 'bg-white border-zinc-300'}`}
+                                    title={selectedCaseIdSet.has(c.id) ? '取消选择' : '选择'}
+                                  >
+                                    {selectedCaseIdSet.has(c.id) && <Check className="w-3 h-3 text-white" />}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => { if (caseSelectMode) { toggleCaseSelected(c.id); return; } setSelectedSuiteId(null); setSuiteDoc(null); setSelectedSuiteRunId(null); setSelectedSuiteRun(null); setSelectedCase(c); }}
+                                  className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                                >
+                                  <FileJson className="w-4 h-4 opacity-70 shrink-0" />
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="truncate">{c.name}</span>
+                                    {c.tags && c.tags.length > 0 && (
+                                      <div className="flex gap-1 mt-0.5 overflow-hidden">
+                                        {c.tags.slice(0, 3).map(tag => (
+                                          <span key={tag} className="text-[9px] bg-zinc-100 text-zinc-600 px-1 rounded-sm border border-zinc-200 shrink-0">{tag}</span>
+                                        ))}
+                                        {c.tags.length > 3 && <span className="text-[9px] text-zinc-500 shrink-0">+{c.tags.length - 3}</span>}
+                                      </div>
+                                    )}
+                                  </div>
+                                </button>
+                                {!caseSelectMode && (
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleMoveCasesToGroup([c.id], c.group_name || ''); }}
+                                      className={`p-1.5 rounded-md border transition-colors ${selectedCase?.id === c.id ? 'border-[#10a37f]/25 bg-[#10a37f]/10 text-[#0e8a6a]' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 text-zinc-500'}`}
+                                      title="移动分组"
+                                    >
+                                      <Folder className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleEditTags(c); }}
+                                      className={`p-1.5 rounded-md border transition-colors ${selectedCase?.id === c.id ? 'border-[#10a37f]/25 bg-[#10a37f]/10 text-[#0e8a6a]' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 text-zinc-500'}`}
+                                      title="编辑标签"
+                                    >
+                                      <Tag className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleRename(c); }}
+                                      className={`p-1.5 rounded-md border transition-colors ${selectedCase?.id === c.id ? 'border-[#10a37f]/25 bg-[#10a37f]/10 text-[#0e8a6a]' : 'border-transparent hover:border-zinc-200 hover:bg-zinc-50 text-zinc-500'}`}
+                                      title="改名"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteCase(c); }}
+                                      className={`p-1.5 rounded-md border transition-colors ${selectedCase?.id === c.id ? 'border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700' : 'border-transparent hover:border-rose-200 hover:bg-rose-50 text-zinc-500 hover:text-rose-700'}`}
+                                      title="删除"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
-                  </li>
-                ))}
+                  );
+                })}
                 {filteredCases.length === 0 && (
                   <div className="text-sm text-zinc-500 p-4 text-center border border-dashed border-zinc-200 rounded-xl mt-3 bg-white">
                     未找到匹配用例<br/><span className="text-xs mt-1 block">可点击顶部「新建用例」通过自然语言创建</span>
                   </div>
                 )}
-              </ul>
+              </div>
             </>
           )}
 
@@ -2001,7 +2167,7 @@ function App() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    {selectedCase && runs.length > 0 && (
+                    {runSource.length > 0 && (
                       <select
                         value={runFailureFilter}
                         onChange={(e) => setRunFailureFilter(e.target.value)}
@@ -2017,15 +2183,15 @@ function App() {
                     )}
                     <button
                       onClick={() => setRunSelectMode(true)}
-                      disabled={!selectedCase || runs.length === 0}
+                      disabled={runSource.length === 0}
                       className="p-2 rounded-xl hover:bg-zinc-100 text-zinc-500 hover:text-zinc-900 disabled:opacity-50"
                       title="批量选择"
                     >
                       <ListChecks className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => { if (selectedCase) fetchRuns(selectedCase.id); }}
-                      disabled={!selectedCase || runsLoading}
+                      onClick={() => { if (selectedCase) fetchRuns(selectedCase.id, selectedCase); else fetchAllRuns(); }}
+                      disabled={runsLoading}
                       className="p-2 rounded-xl hover:bg-zinc-100 text-zinc-500 hover:text-zinc-900 disabled:opacity-50"
                       title="刷新"
                     >
@@ -2034,9 +2200,10 @@ function App() {
                   </div>
                 )}
               </div>
-              {!selectedCase ? (
-                <div className="text-xs text-zinc-600 px-2">选择用例后展示</div>
-              ) : runs.length === 0 ? (
+              {!selectedCase && runSource.length > 0 && (
+                <div className="text-[11px] text-zinc-500 px-2 mb-2">当前展示全部用例的历史记录；选择某个用例后会自动筛选。</div>
+              )}
+              {runSource.length === 0 ? (
                 <div className="text-xs text-zinc-600 px-2">暂无运行记录</div>
               ) : (
                 <div className="space-y-1 px-2 pb-2">
@@ -2092,6 +2259,11 @@ function App() {
                             </div>
                           </div>
                           <div className="mt-1 flex items-center gap-1.5 min-w-0 overflow-hidden">
+                            {!selectedCase && r.case_id && (
+                              <span className="shrink min-w-0 max-w-[140px] truncate text-[10px] leading-4 px-1.5 py-0.5 rounded-full border border-zinc-200 bg-white text-zinc-500 font-mono" title={r.case_id}>
+                                {r.case_id}
+                              </span>
+                            )}
                             {r.status === 'failed' && r.failure_reason?.category && (
                               <span className={`shrink min-w-0 max-w-[120px] truncate text-[10px] leading-4 px-1.5 py-0.5 rounded-full border font-medium ${getFailureSeverityClass(r.failure_reason.severity)}`} title={r.failure_reason.message || r.failure_reason.category}>
                                 {getFailureLabel(r.failure_reason)}

@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import secrets
 import sys
+import shutil
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -203,11 +204,26 @@ def _case_path(case_id: str) -> str:
         case_id += ".json"
     return os.path.join(CASES_DIR, case_id)
 
+def _stable_prefixed_id(prefix: str, suffix: str = "") -> str:
+    safe_suffix = _safe_case_name(suffix) if suffix else ""
+    tail = f"_{safe_suffix}" if safe_suffix else ""
+    return f"{prefix}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}{tail}"
+
+def _stable_case_id(name: str = "") -> str:
+    return f"{_stable_prefixed_id('case', name)}.json"
+
+def _stable_suite_id() -> str:
+    return _stable_prefixed_id('suite')
+
+def _stable_env_id() -> str:
+    return _stable_prefixed_id('env')
+
 def _case_doc_from_model(c: CaseModel) -> Dict[str, Any]:
     return {
         "id": c.id,
         "name": c.name,
         "type": c.type,
+        "group_name": getattr(c, "group_name", None) or "",
         "start_url": getattr(c, "start_url", None),
         "steps": json.loads(c.steps) if c.steps else [],
         "tags": json.loads(c.tags) if getattr(c, "tags", None) else [],
@@ -235,6 +251,7 @@ def _list_cases() -> List[Dict[str, Any]]:
             "id": c.id,
             "name": c.name,
             "type": c.type,
+            "group_name": getattr(c, "group_name", None) or "",
             "tags": json.loads(c.tags) if c.tags else [],
             "updated_at": c.updated_at or c.created_at or 0
         } for c in cases]
@@ -404,6 +421,39 @@ def _list_suite_runs(suite_id: Optional[str] = None) -> List[Dict[str, Any]]:
     runs.sort(key=lambda x: x.get("started_at") or 0, reverse=True)
     return runs
 
+def _rename_case_run_refs(old_case_id: str, new_case_id: str) -> int:
+    if not old_case_id or not new_case_id or not os.path.exists(RUNS_DIR):
+        return 0
+    updated = 0
+    for d in os.listdir(RUNS_DIR):
+        meta_path = os.path.join(RUNS_DIR, d, "meta.json")
+        if not os.path.exists(meta_path):
+            continue
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            if not _case_id_matches_run(meta.get("case_id"), old_case_id):
+                continue
+            meta["case_id"] = new_case_id
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+            updated += 1
+        except Exception:
+            continue
+    return updated
+
+def _case_id_matches_run(meta_case_id: Any, requested_case_id: str) -> bool:
+    stored = str(meta_case_id or "").strip()
+    requested = str(requested_case_id or "").strip()
+    if not stored or not requested:
+        return False
+    variants = {requested}
+    if requested.endswith(".json"):
+        variants.add(requested[:-5])
+    else:
+        variants.add(f"{requested}.json")
+    return stored in variants
+
 def _list_runs(case_id: Optional[str] = None) -> List[Dict[str, Any]]:
     runs: List[Dict[str, Any]] = []
     if not os.path.exists(RUNS_DIR):
@@ -418,7 +468,7 @@ def _list_runs(case_id: Optional[str] = None) -> List[Dict[str, Any]]:
         except Exception:
             continue
         meta = _migrate_run_meta(meta, meta_path)
-        if case_id and meta.get("case_id") != case_id:
+        if case_id and not _case_id_matches_run(meta.get("case_id"), case_id):
             continue
         runs.append({
             "id": meta.get("id") or d,
@@ -897,13 +947,14 @@ async def generate_case(req: GenerateCaseReq):
         data = json.loads(content)
         
         # 构造用例结构
-        case_id = f"demo_case_{int(time.time() * 1000)}.json"
+        case_id = _stable_case_id(req.name or "natural")
         
         db = SessionLocal()
         try:
             new_case = CaseModel(
                 id=case_id,
                 name=req.name or "自然语言生成的用例",
+                group_name="",
                 type="json",
                 start_url=req.start_url,
                 steps=json.dumps(data.get("steps", [])),
@@ -943,9 +994,7 @@ async def get_suites():
 async def create_suite(request: Request):
     data = await request.json()
     name = str(data.get("name") or "").strip() or f"suite_{int(time.time())}"
-    suite_id = _safe_suite_id(data.get("id") or name)
-    if not suite_id.endswith(".json"):
-        suite_id += ".json"
+    suite_id = _stable_suite_id()
         
     env_id = data.get("env_id")
     setup_case_id = str(data.get("setup_case_id") or "").strip() or None
@@ -1258,16 +1307,15 @@ def _create_case_from_payload(data: Dict[str, Any], normalize_recorded: bool = F
 
     db = SessionLocal()
     try:
-        final_case_id = case_id
+        final_case_id = _stable_case_id(name)
         final_name = name
-        if db.query(CaseModel).filter_by(id=final_case_id).first():
-            suffix = int(time.time() * 1000)
-            final_name = f"{name}_{suffix}"
-            final_case_id = f"{final_name}.json"
+        while db.query(CaseModel).filter_by(id=final_case_id).first():
+            final_case_id = _stable_case_id(name)
 
         new_case = CaseModel(
             id=final_case_id,
             name=final_name,
+            group_name=str(data.get("group_name") or "").strip(),
             type="json",
             start_url=data.get("start_url"),
             steps=json.dumps(steps),
@@ -1348,11 +1396,35 @@ async def update_case(case_id: str, request: Request):
             c.name = data.get("name")
         if "start_url" in data:
             c.start_url = data.get("start_url")
+        if "group_name" in data:
+            c.group_name = str(data.get("group_name") or "").strip()
         c.updated_at = int(time.time())
         db.commit()
         return JSONResponse({"status": "success", "message": "Case updated"})
     finally:
         db.close()
+@app.post("/api/cases/batch_group")
+async def batch_group_cases(request: Request):
+    data = await request.json()
+    case_ids = data.get("case_ids") or []
+    group_name = str(data.get("group_name") or "").strip()
+    if not isinstance(case_ids, list) or not case_ids:
+        return JSONResponse({"error": "请选择要移动的用例"}, status_code=400)
+    db = SessionLocal()
+    try:
+        now = int(time.time())
+        updated = 0
+        cases = db.query(CaseModel).filter(CaseModel.id.in_(case_ids)).all()
+        for c in cases:
+            _write_case_backup_file(c.id, _case_doc_from_model(c))
+            c.group_name = group_name
+            c.updated_at = now
+            updated += 1
+        db.commit()
+        return JSONResponse({"status": "success", "updated": updated, "group_name": group_name})
+    finally:
+        db.close()
+
 @app.post("/api/cases/{case_id}/rename")
 async def rename_case(case_id: str, request: Request):
     data = await request.json()
@@ -1362,21 +1434,17 @@ async def rename_case(case_id: str, request: Request):
         return JSONResponse({"error": "用例名称不能为空"}, status_code=400)
     if new_name.endswith(".json"):
         new_name = new_name[:-5]
-    new_case_id = f"{new_name}.json"
     db = SessionLocal()
     try:
         c = db.query(CaseModel).filter_by(id=case_id).first()
         if not c:
             return JSONResponse({"error": "用例不存在"}, status_code=404)
-        if new_case_id != case_id and db.query(CaseModel).filter_by(id=new_case_id).first():
+        if db.query(CaseModel).filter(CaseModel.id != case_id, CaseModel.name == new_name).first():
             return JSONResponse({"error": "同名用例已存在"}, status_code=409)
         _write_case_backup_file(case_id, _case_doc_from_model(c))
-        old_case_id = c.id
-        c.id = new_case_id
         c.name = new_name
         c.updated_at = int(time.time())
         db.commit()
-        _update_suites_case_ref(old_case_id, new_case_id)
         return JSONResponse({"status": "success", "case": _case_doc_from_model(c)})
     finally:
         db.close()
@@ -1528,8 +1596,8 @@ async def get_case_script(case_id: str):
         db.close()
 
 @app.get("/api/runs")
-async def get_runs(case_id: Optional[str] = None):
-    return JSONResponse(_list_runs(case_id=case_id))
+async def get_runs(case_id: Optional[str] = None, include_all: bool = False):
+    return JSONResponse(_list_runs(case_id=None if include_all else case_id))
 
 @app.get("/api/runs/{run_id}")
 async def get_run_detail(run_id: str):
@@ -1582,13 +1650,23 @@ async def ai_fix_suggest(run_id: str, req: RunFixSuggestReq):
         pass
     return JSONResponse({"status": "ok", "suggestion": suggestion})
 
-@app.delete("/api/runs/{run_id}")
-async def delete_run(run_id: str):
+def _deleted_runs_dir() -> str:
+    d = os.path.join(RUNS_DIR, "_deleted")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def _trash_run_dir(run_id: str) -> bool:
     d = _run_dir(run_id)
     if not os.path.exists(d):
+        return False
+    target = os.path.join(_deleted_runs_dir(), f"{os.path.basename(d)}_{int(time.time())}")
+    shutil.move(d, target)
+    return True
+
+@app.delete("/api/runs/{run_id}")
+async def delete_run(run_id: str):
+    if not _trash_run_dir(run_id):
         return JSONResponse({"error": "Run not found"}, status_code=404)
-    import shutil
-    shutil.rmtree(d, ignore_errors=True)
     return JSONResponse({"status": "success"})
 
 class BatchDeleteRunsReq(BaseModel):
@@ -1599,15 +1677,12 @@ async def batch_delete_runs(req: BatchDeleteRunsReq):
     run_ids = [str(x).strip() for x in (req.run_ids or []) if str(x or "").strip()]
     if not run_ids:
         return JSONResponse({"error": "Missing run_ids"}, status_code=400)
-    import shutil
     deleted: List[str] = []
     not_found: List[str] = []
     for run_id in run_ids:
-        d = _run_dir(run_id)
-        if not os.path.exists(d):
+        if not _trash_run_dir(run_id):
             not_found.append(run_id)
             continue
-        shutil.rmtree(d, ignore_errors=True)
         deleted.append(run_id)
     return JSONResponse({"status": "success", "deleted": deleted, "not_found": not_found})
 
@@ -2176,19 +2251,44 @@ async def push_screenshot(session_id: str, request: Request):
 
 ENVS_FILE = os.path.join(PROJECT_ROOT, "tests", "environments.json")
 
+def _normalize_environments(data: Any) -> List[Dict[str, Any]]:
+    if not isinstance(data, list):
+        return []
+    normalized = []
+    seen = set()
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        base_url = str(item.get("base_url") or "").strip()
+        if not name and not base_url:
+            continue
+        env_id = str(item.get("id") or "").strip()
+        if not env_id or not env_id.startswith("env_"):
+            env_id = _stable_env_id()
+        while env_id in seen:
+            env_id = _stable_env_id()
+        seen.add(env_id)
+        normalized.append({"id": env_id, "name": name or env_id, "base_url": base_url})
+    return normalized
+
 @app.get("/api/environments")
 async def get_environments():
     if not os.path.exists(ENVS_FILE):
         return JSONResponse([])
     with open(ENVS_FILE, "r", encoding="utf-8") as f:
-        return JSONResponse(json.load(f))
+        envs = _normalize_environments(json.load(f))
+    with open(ENVS_FILE, "w", encoding="utf-8") as f:
+        json.dump(envs, f, ensure_ascii=False, indent=2)
+    return JSONResponse(envs)
 
 @app.post("/api/environments")
 async def save_environments(request: Request):
     data = await request.json()
+    envs = _normalize_environments(data)
     with open(ENVS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    return JSONResponse({"status": "success"})
+        json.dump(envs, f, ensure_ascii=False, indent=2)
+    return JSONResponse({"status": "success", "environments": envs})
 
 PROMPTS_DIR = os.path.join(PROJECT_ROOT, "src", "ai_tester", "prompts")
 

@@ -32,6 +32,7 @@ def migrate_schema() -> None:
             "description": "VARCHAR",
             "dataset": "TEXT",
             "variables": "TEXT",
+            "group_name": "VARCHAR",
         })
         _ensure_columns("suites", {
             "description": "VARCHAR",
@@ -57,6 +58,7 @@ class CaseModel(Base):
     id = Column(String, primary_key=True, index=True)
     name = Column(String, index=True)
     description = Column(String)
+    group_name = Column(String)
     type = Column(String)
     start_url = Column(String)
     steps = Column(Text) # JSON list
