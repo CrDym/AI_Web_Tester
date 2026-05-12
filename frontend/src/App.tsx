@@ -232,6 +232,7 @@ function App() {
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null);
+  const [runDetailStandalone, setRunDetailStandalone] = useState(false);
   const [pendingRunToOpen, setPendingRunToOpen] = useState<{ case_id: string; run_id: string } | null>(null);
   const [selectedShotFile, setSelectedShotFile] = useState<string | null>(null);
   const [shotCache, setShotCache] = useState<Record<string, string>>({});
@@ -419,6 +420,7 @@ function App() {
     setCases([]);
     setSelectedRunId(null);
     setSelectedRun(null);
+    setRunDetailStandalone(false);
     setRuns([]);
     setAllRuns([]);
     setSuiteRuns([]);
@@ -493,6 +495,7 @@ function App() {
       setScriptContent('');
       setSelectedRunId(null);
       setSelectedRun(null);
+      setRunDetailStandalone(false);
       setScreenshot(null);
       setLogs([]);
       setSelectedShotFile(null);
@@ -841,6 +844,7 @@ function App() {
       if (selectedRunId === runId) {
         setSelectedRunId(null);
         setSelectedRun(null);
+        setRunDetailStandalone(false);
         setLogs([]);
         setScreenshot(null);
         setSelectedShotFile(null);
@@ -887,6 +891,7 @@ function App() {
       if (selectedRunId && selectedRunIdSet.has(selectedRunId)) {
         setSelectedRunId(null);
         setSelectedRun(null);
+        setRunDetailStandalone(false);
         setLogs([]);
         setScreenshot(null);
         setSelectedShotFile(null);
@@ -916,6 +921,7 @@ function App() {
         if (selectedRunId && selectedRunIdSet.has(selectedRunId)) {
           setSelectedRunId(null);
           setSelectedRun(null);
+          setRunDetailStandalone(false);
           setLogs([]);
           setScreenshot(null);
           setSelectedShotFile(null);
@@ -935,7 +941,7 @@ function App() {
     }
   };
 
-  const loadRunDetail = async (runId: string) => {
+  const loadRunDetail = async (runId: string, standalone = false) => {
     try {
       if (wsRef.current) {
         wsRef.current.close();
@@ -952,6 +958,13 @@ function App() {
       
       setSelectedRunId(runId);
       setSelectedRun(detail);
+      setRunDetailStandalone(standalone && !selectedCase);
+      if (standalone && !selectedCase) {
+        setSelectedSuiteId(null);
+        setSuiteDoc(null);
+        setSelectedSuiteRunId(null);
+        setSelectedSuiteRun(null);
+      }
       setLogs(detail.logs || []);
 
       if (detail.screenshots && detail.screenshots.length > 0) {
@@ -984,6 +997,7 @@ function App() {
       setLogs([`❌ 回放加载失败: ${e.message}`]);
       setScreenshot(null);
       setSelectedRun(null);
+      setRunDetailStandalone(false);
       setSelectedShotFile(null);
     }
   };
@@ -998,6 +1012,7 @@ function App() {
     setLeftTab('editor');
     setSelectedRunId(null);
     setSelectedRun(null);
+    setRunDetailStandalone(false);
     axios.get(`/api/cases/${selectedCase.id}`).then(res => {
       setCaseDoc(res.data);
       setLastSaved(JSON.stringify(res.data));
@@ -1660,6 +1675,10 @@ function App() {
   };
 
   const isReplayMode = !!selectedRunId && !isRunning;
+  const activeCaseForRun = selectedCase || (selectedRun ? cases.find((c) => c.id === selectedRun.case_id) || null : null);
+  const mainCaseContext = selectedCase || (runDetailStandalone && selectedRun ? activeCaseForRun : null);
+  const mainTitle = mainCaseContext?.name || (selectedRun ? `运行记录 ${selectedRun.id}` : '未选择用例');
+  const mainCaseId = mainCaseContext?.id || selectedRun?.case_id || '';
 
   const formatShotTime = (ms?: number) => {
     if (!ms) return '';
@@ -2216,7 +2235,7 @@ function App() {
                     return (
                     <div
                       key={r.id}
-                      onClick={() => (runSelectMode ? toggleRunSelected(r.id) : loadRunDetail(r.id))}
+                      onClick={() => (runSelectMode ? toggleRunSelected(r.id) : loadRunDetail(r.id, !selectedCase))}
                       className={`group w-full rounded-xl border text-xs cursor-pointer px-3 py-2.5 transition-all ${
                         selectedRunId === r.id
                           ? 'bg-[#10a37f]/10 border-[#10a37f]/30 text-zinc-900 shadow-sm'
@@ -2509,14 +2528,14 @@ function App() {
               )}
             </div>
           </>
-        ) : selectedCase ? (
+        ) : mainCaseContext || (runDetailStandalone && selectedRun) ? (
           <>
             {/* Header Bar */}
             <div className="h-14 border-b border-zinc-200 bg-white px-6 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-3">
                 <div className="flex flex-col leading-tight">
                   <div className="flex items-center gap-2">
-                    <div className="text-sm font-semibold text-zinc-900 truncate max-w-[520px]">{selectedCase.name}</div>
+                    <div className="text-sm font-semibold text-zinc-900 truncate max-w-[520px]">{mainTitle}</div>
                     {isReplayMode && (
                       <span className="text-[11px] px-2 py-0.5 rounded-full border border-zinc-200 text-zinc-600 bg-zinc-50">
                         回放
@@ -2527,7 +2546,7 @@ function App() {
                     </span>
                   </div>
                   <div className="text-[11px] text-zinc-500 font-mono">
-                    {`CaseID: ${selectedCase.id}`}
+                    {`CaseID: ${mainCaseId}`}
                   </div>
                 </div>
               </div>
@@ -2542,7 +2561,7 @@ function App() {
                     <option key={env.id} value={env.id}>{env.name}</option>
                   ))}
                 </select>
-                {!isReplayMode && (
+                {!isReplayMode && mainCaseContext && (
                   <>
                       <button
                         onClick={handleRestoreBackup}
@@ -2573,10 +2592,10 @@ function App() {
                 )}
                 {isReplayMode && (
                   <button
-                    onClick={handleExitReplay}
+                    onClick={() => { if (runDetailStandalone) { setSelectedRunId(null); setSelectedRun(null); setRunDetailStandalone(false); setLogs([]); setScreenshot(null); setSelectedShotFile(null); } else { handleExitReplay(); } }}
                     className="flex items-center gap-2 bg-white hover:bg-zinc-100 text-zinc-900 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-zinc-200"
                   >
-                    返回编辑
+                    {runDetailStandalone ? '返回历史' : '返回编辑'}
                   </button>
                 )}
                 {!(isRunning || selectedRun?.status === 'running') ? (
