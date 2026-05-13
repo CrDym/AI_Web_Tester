@@ -222,13 +222,15 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [leftTab, setLeftTab] = useState<'editor' | 'dataset' | 'python'>('editor');
   const wsRef = useRef<WebSocket | null>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const liveLogsEndRef = useRef<HTMLDivElement>(null);
+  const suiteLogsEndRef = useRef<HTMLDivElement>(null);
   const [lastSaved, setLastSaved] = useState<string>('');
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [allRuns, setAllRuns] = useState<RunSummary[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [runFailureFilter, setRunFailureFilter] = useState<string>('');
   const [runSelectMode, setRunSelectMode] = useState(false);
+  const [runLogFilter, setRunLogFilter] = useState<'all' | 'error' | 'warning' | 'ai' | 'success'>('all');
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null);
@@ -956,6 +958,7 @@ function App() {
         setIsRunning(true);
       }
       
+      setRunLogFilter('all');
       setSelectedRunId(runId);
       setSelectedRun(detail);
       setRunDetailStandalone(standalone && !selectedCase);
@@ -1030,10 +1033,13 @@ function App() {
     });
   }, [selectedCase]);
 
-  // Auto-scroll logs
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs, suiteLogs]);
+    liveLogsEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [logs]);
+
+  useEffect(() => {
+    suiteLogsEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [suiteLogs]);
 
   useEffect(() => {
     if (!selectedSuiteRun || selectedSuiteRun.status !== 'running') {
@@ -1673,6 +1679,76 @@ function App() {
       };
     }
   };
+
+  const getLogKind = (log: string): 'error' | 'warning' | 'ai' | 'success' | 'normal' => {
+    const lower = log.toLowerCase();
+    if (log.includes("❌") || log.includes("FAILED") || lower.includes('error')) return 'error';
+    if (log.includes("🚑") || log.includes("⚠️") || lower.includes('warning')) return 'warning';
+    if (log.includes("🤖") || log.includes("✨")) return 'ai';
+    if (log.includes("✅")) return 'success';
+    return 'normal';
+  };
+
+  const getLogTone = (log: string) => {
+    const kind = getLogKind(log);
+    if (kind === 'success') return { icon: '✓', text: 'text-emerald-700 dark:text-emerald-300', iconWrap: 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/25' };
+    if (kind === 'error') return { icon: '×', text: 'text-rose-700 dark:text-rose-300', iconWrap: 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/25' };
+    if (kind === 'warning') return { icon: '!', text: 'text-amber-700 dark:text-amber-300', iconWrap: 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/25' };
+    if (kind === 'ai') return { icon: 'AI', text: 'text-[#0e8a6a] dark:text-[#10a37f]', iconWrap: 'bg-[#10a37f]/10 text-[#0e8a6a] border-[#10a37f]/20 dark:bg-[#10a37f]/15 dark:text-[#10a37f] dark:border-[#10a37f]/25' };
+    if (log.includes("🛑")) return { icon: '■', text: 'text-zinc-700 dark:text-zinc-300', iconWrap: 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700' };
+    return { icon: '›', text: 'text-zinc-700 dark:text-zinc-300', iconWrap: 'bg-zinc-50 text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-500 dark:border-zinc-800' };
+  };
+
+  const renderLogStream = (items: string[], emptyText: string, endRef?: React.RefObject<HTMLDivElement | null>) => (
+    <div className="flex-1 overflow-auto p-4 bg-transparent font-mono text-[13px] leading-relaxed custom-scrollbar">
+      {items.length === 0 ? (
+        <div className="h-full min-h-[96px] flex items-center justify-center text-center">
+          <div>
+            <div className="mx-auto mb-2 w-8 h-8 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex items-center justify-center text-zinc-400 dark:text-zinc-500">
+              <Terminal className="w-4 h-4" />
+            </div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">{emptyText}</div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {items.map((log, i) => {
+            const tone = getLogTone(log);
+            return (
+              <div key={i} className="flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-zinc-100/70 dark:hover:bg-zinc-900/70 transition-colors">
+                <span className="mt-0.5 w-8 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-600 select-none tabular-nums">{String(i + 1).padStart(2, '0')}</span>
+                <span className={`mt-0.5 w-5 h-5 shrink-0 rounded-md border flex items-center justify-center text-[10px] font-bold leading-none ${tone.iconWrap}`}>{tone.icon}</span>
+                <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words ${tone.text}`}>{log}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {endRef ? <div ref={endRef} /> : null}
+    </div>
+  );
+
+  const filteredRunLogs = useMemo(() => {
+    if (runLogFilter === 'all') return logs;
+    return logs.filter((log) => getLogKind(log) === runLogFilter);
+  }, [logs, runLogFilter]);
+
+  const runLogStats = useMemo(() => {
+    const base = { all: logs.length, error: 0, warning: 0, ai: 0, success: 0 };
+    logs.forEach((log) => {
+      const kind = getLogKind(log);
+      if (kind === 'error' || kind === 'warning' || kind === 'ai' || kind === 'success') base[kind] += 1;
+    });
+    return base;
+  }, [logs]);
+
+  const diagnosticStats = selectedRun ? [
+    { label: '耗时', value: selectedRun.duration_ms ? `${Math.round((selectedRun.duration_ms || 0) / 1000)}s` : '—' },
+    { label: '日志', value: String(selectedRun.logs?.length || 0) },
+    { label: '截图', value: String(selectedRun.screenshots?.length || 0) },
+    { label: '自愈', value: String(selectedRun.heal_events?.length || 0) },
+    { label: 'Token', value: formatTokenUsage(selectedRun.token_usage) || '—' },
+  ] : [];
 
   const isReplayMode = !!selectedRunId && !isRunning;
   const activeCaseForRun = selectedCase || (selectedRun ? cases.find((c) => c.id === selectedRun.case_id) || null : null);
@@ -2484,27 +2560,24 @@ function App() {
 
               {/* 实时监控面板（当有正在执行的用例时显示） */}
               {selectedSuiteRun.status === 'running' && (
-                <div className="mt-6 flex h-[400px] rounded-2xl border border-zinc-200 overflow-hidden bg-white">
+                <div className="mt-6 flex h-[400px] rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950 shadow-sm">
                   {/* Logs */}
-                  <div className="w-1/3 flex flex-col border-r border-zinc-200 min-h-0 bg-white">
-                    <div className="px-4 py-2 text-xs font-semibold text-zinc-600 border-b border-zinc-200 flex items-center gap-2 shrink-0">
-                      <Terminal className="w-3.5 h-3.5" /> 实时日志
+                  <div className="w-1/3 flex flex-col border-r border-zinc-200 dark:border-zinc-800 min-h-0 bg-zinc-50 dark:bg-black">
+                    <div className="px-4 py-2.5 bg-white dark:bg-zinc-950 text-xs font-semibold text-zinc-700 dark:text-zinc-300 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-xl flex items-center justify-center border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400">
+                          <Terminal className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="flex flex-col leading-tight">
+                          <span>实时日志</span>
+                          <span className="text-[10px] font-normal text-zinc-400 dark:text-zinc-500">Suite stream</span>
+                        </div>
+                      </div>
+                      <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 text-[10px] font-mono font-medium text-zinc-500 dark:text-zinc-400">
+                        {suiteLogs.length} lines
+                      </span>
                     </div>
-                    <div className="flex-1 overflow-auto p-4 font-mono text-[13px] leading-relaxed">
-                      {suiteLogs.length === 0 ? (
-                        <div className="text-zinc-400 italic">等待日志输出...</div>
-                      ) : (
-                        suiteLogs.map((log, i) => {
-                          let colorClass = "text-zinc-700";
-                          if (log.includes("✅")) colorClass = "text-emerald-500";
-                          if (log.includes("❌") || log.includes("FAILED")) colorClass = "text-rose-500";
-                          if (log.includes("🚑") || log.includes("⚠️")) colorClass = "text-amber-500";
-                          if (log.includes("🤖") || log.includes("✨")) colorClass = "text-[#10a37f]";
-                          return <div key={i} className={`mb-1 break-words ${colorClass}`}>{log}</div>;
-                        })
-                      )}
-                      <div ref={logsEndRef} />
-                    </div>
+                    {renderLogStream(suiteLogs, '等待套件执行日志输出', suiteLogsEndRef)}
                   </div>
                   {/* Screenshot */}
                   <div className="flex-1 flex flex-col min-h-0">
@@ -2621,7 +2694,7 @@ function App() {
               {/* Left Panel: Script Content / Logs */}
               <div className="flex-1 flex flex-col border-r border-zinc-200 bg-white min-w-0">
                 {/* Script View */}
-                <div className="h-2/3 flex flex-col border-b border-zinc-200 min-h-0">
+                <div className={`${isReplayMode ? 'h-full' : 'h-2/3'} flex flex-col border-b border-zinc-200 min-h-0`}>
                   {isReplayMode ? (
                     <div className="px-4 py-2 bg-zinc-50 text-xs font-semibold text-zinc-600 flex items-center justify-between border-b border-zinc-200">
                       <div className="flex items-center gap-2">
@@ -2664,58 +2737,106 @@ function App() {
                     {isReplayMode ? (
                       selectedRun ? (
                         <div className="space-y-4 text-sm">
-                          <div className="bg-white rounded-xl border border-zinc-200 p-4 space-y-3">
-                            <div className="text-xs text-zinc-500 flex justify-between items-center">
-                              <div>运行ID: <span className="font-mono text-zinc-900">{selectedRun.id}</span></div>
-                              <div className={`px-2 py-1 rounded-md ${selectedRun.status === 'passed' || selectedRun.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' : selectedRun.status === 'failed' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                          <div className="bg-white dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+                            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">运行诊断</div>
+                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{selectedRun.id}</div>
+                              </div>
+                              <div className={`shrink-0 px-2.5 py-1 rounded-full text-xs border ${selectedRun.status === 'passed' || selectedRun.status === 'completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300' : selectedRun.status === 'failed' ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300' : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-300'}`}>
                                 {formatStatus(selectedRun.status)}
                               </div>
                             </div>
-                            <div className="text-xs text-zinc-500 flex flex-wrap gap-4">
-                              <div>开始: <span className="text-zinc-900">{formatRunTime(selectedRun.started_at)}</span></div>
-                              {selectedRun.duration_ms ? (
-                                <div>耗时: <span className="text-zinc-900">{Math.round((selectedRun.duration_ms || 0) / 1000)}s</span></div>
-                              ) : null}
+                            <div className="grid grid-cols-5 divide-x divide-zinc-200 dark:divide-zinc-800 border-b border-zinc-200 dark:border-zinc-800">
+                              {diagnosticStats.map((item) => (
+                                <div key={item.label} className="px-3 py-3 min-w-0">
+                                  <div className="text-[11px] text-zinc-500 dark:text-zinc-500">{item.label}</div>
+                                  <div className="mt-1 text-xs font-mono text-zinc-900 dark:text-zinc-100 truncate" title={item.value}>{item.value}</div>
+                                </div>
+                              ))}
                             </div>
-                            <div className="text-xs text-zinc-500 flex flex-wrap gap-4">
-                              <div>截图数: <span className="text-zinc-900">{selectedRun.screenshots?.length || 0}</span></div>
-                              <div>日志行: <span className="text-zinc-900">{selectedRun.logs?.length || 0}</span></div>
+                            <div className="px-4 py-3 text-xs text-zinc-500 dark:text-zinc-400 flex flex-wrap gap-x-4 gap-y-1">
+                              <div>开始：<span className="text-zinc-900 dark:text-zinc-100">{formatRunTime(selectedRun.started_at)}</span></div>
+                              {selectedRun.case_id ? <div>Case：<span className="font-mono text-zinc-900 dark:text-zinc-100">{selectedRun.case_id}</span></div> : null}
                             </div>
-                            <div className="text-xs text-zinc-500">
-                              Token消耗: <span className="text-zinc-900 font-mono">{formatTokenUsage(selectedRun.token_usage)}</span>
-                            </div>
-                            {selectedRun.status === 'failed' && selectedRun.failure_reason?.category && (() => {
-                              const tone = getFailureSeverityTone(selectedRun.failure_reason.severity);
-                              return (
-                                <div className={`mt-3 rounded-2xl border p-4 overflow-hidden relative ${tone.card}`}>
-                                  <div className="absolute inset-y-0 left-0 w-1 bg-current opacity-25" />
-                                  <div className="flex items-start gap-3">
-                                    <div className={`mt-0.5 w-8 h-8 rounded-2xl ring-1 flex items-center justify-center shrink-0 ${tone.icon}`}>
-                                      <AlertTriangle className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div>
-                                          <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50 leading-5">{getFailureLabel(selectedRun.failure_reason)}</div>
-                                          <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">系统已根据日志自动识别失败类型</div>
-                                        </div>
-                                        {selectedRun.failure_reason.failed_step_no ? (
-                                          <div className={`shrink-0 text-[11px] px-2 py-1 rounded-full border font-mono ${tone.badge}`}>步骤 {selectedRun.failure_reason.failed_step_no}</div>
-                                        ) : null}
+                          </div>
+
+                          {selectedRun.status === 'failed' && selectedRun.failure_reason?.category && (() => {
+                            const tone = getFailureSeverityTone(selectedRun.failure_reason.severity);
+                            return (
+                              <div className={`rounded-2xl border p-4 overflow-hidden relative ${tone.card}`}>
+                                <div className="absolute inset-y-0 left-0 w-1 bg-current opacity-25" />
+                                <div className="flex items-start gap-3">
+                                  <div className={`mt-0.5 w-9 h-9 rounded-2xl ring-1 flex items-center justify-center shrink-0 ${tone.icon}`}>
+                                    <AlertTriangle className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div>
+                                        <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50 leading-5">{getFailureLabel(selectedRun.failure_reason)}</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">系统已根据日志自动识别失败类型</div>
                                       </div>
-                                      {selectedRun.failure_reason.message ? (
-                                        <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] font-mono break-words leading-relaxed ${tone.code}`}>{selectedRun.failure_reason.message}</div>
-                                      ) : null}
-                                      {selectedRun.failure_reason.suggestion ? (
-                                        <div className="mt-3 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300">
-                                          <span className="font-semibold text-zinc-900 dark:text-zinc-100">建议：</span>{selectedRun.failure_reason.suggestion}
-                                        </div>
+                                      {selectedRun.failure_reason.failed_step_no ? (
+                                        <div className={`shrink-0 text-[11px] px-2 py-1 rounded-full border font-mono ${tone.badge}`}>步骤 {selectedRun.failure_reason.failed_step_no}</div>
                                       ) : null}
                                     </div>
+                                    {selectedRun.failure_reason.message ? (
+                                      <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] font-mono break-words leading-relaxed ${tone.code}`}>{selectedRun.failure_reason.message}</div>
+                                    ) : null}
+                                    {selectedRun.failure_reason.suggestion ? (
+                                      <div className="mt-3 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300">
+                                        <span className="font-semibold text-zinc-900 dark:text-zinc-100">建议：</span>{selectedRun.failure_reason.suggestion}
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
-                              );
-                            })()}
+                              </div>
+                            );
+                          })()}
+
+                          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden">
+                            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
+                              <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">执行日志</div>
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                {[
+                                  ['all', '全部', runLogStats.all],
+                                  ['error', '错误', runLogStats.error],
+                                  ['warning', '警告', runLogStats.warning],
+                                  ['ai', 'AI', runLogStats.ai],
+                                  ['success', '成功', runLogStats.success],
+                                ].map(([key, label, count]) => (
+                                  <button
+                                    key={key}
+                                    onClick={() => setRunLogFilter(key as any)}
+                                    className={`px-2 py-1 rounded-lg border text-[11px] transition-colors ${runLogFilter === key ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-950 dark:border-zinc-100' : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50 dark:bg-zinc-950 dark:text-zinc-400 dark:border-zinc-800 dark:hover:bg-zinc-900'}`}
+                                  >
+                                    {label} <span className="font-mono opacity-70">{count}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="max-h-64 min-h-[120px] bg-zinc-50 dark:bg-black">
+                              {filteredRunLogs.length === 0 ? (
+                                <div className="h-full min-h-[96px] flex items-center justify-center text-center">
+                                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                    {runLogFilter === 'all' ? '本次运行未记录日志' : '当前过滤条件下没有日志'}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="p-4 font-mono text-[13px] leading-relaxed space-y-1">
+                                  {filteredRunLogs.map((log, i) => {
+                                    const tone = getLogTone(log);
+                                    return (
+                                      <div key={i} className="flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-zinc-100/70 dark:hover:bg-zinc-900/70 transition-colors">
+                                        <span className="mt-0.5 w-8 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-600 select-none tabular-nums">{String(i + 1).padStart(2, '0')}</span>
+                                        <span className={`mt-0.5 w-5 h-5 shrink-0 rounded-md border flex items-center justify-center text-[10px] font-bold leading-none ${tone.iconWrap}`}>{tone.icon}</span>
+                                        <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words ${tone.text}`}>{log}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <div className="pt-2 border-t border-zinc-200">
@@ -3024,31 +3145,33 @@ function App() {
                 </div>
                 
                 {/* Terminal / Logs View */}
-                <div className="h-1/3 flex flex-col min-h-0 bg-zinc-50 border-t border-zinc-200">
-                  <div className="px-4 py-2 bg-zinc-50 text-xs font-semibold text-zinc-600 flex items-center gap-2 border-b border-zinc-200 tracking-wider uppercase">
-                    <Terminal className="w-3.5 h-3.5" /> 实时执行日志
+                {!isReplayMode && (
+                  <div className="h-1/3 flex flex-col min-h-0 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-black">
+                    <div className="px-4 py-2.5 bg-white dark:bg-zinc-950 text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-6 h-6 rounded-xl flex items-center justify-center border ${isRunning ? 'border-[#10a37f]/25 bg-[#10a37f]/10 text-[#0e8a6a] dark:text-[#10a37f]' : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400'}`}>
+                          <Terminal className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="flex flex-col leading-tight">
+                          <span className="tracking-wide">实时执行日志</span>
+                          <span className="text-[10px] font-normal text-zinc-400 dark:text-zinc-500">Live execution stream</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isRunning && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-[#10a37f]/20 bg-[#10a37f]/10 px-2 py-1 text-[10px] font-medium text-[#0e8a6a] dark:text-[#10a37f]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#10a37f] animate-pulse" />
+                            LIVE
+                          </span>
+                        )}
+                        <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 text-[10px] font-mono font-medium text-zinc-500 dark:text-zinc-400">
+                          {logs.length} lines
+                        </span>
+                      </div>
+                    </div>
+                    {renderLogStream(logs, '点击右上角「运行测试」后会在这里实时滚动输出', liveLogsEndRef)}
                   </div>
-                  <div className="flex-1 overflow-auto p-4 bg-transparent font-mono text-[13px] leading-relaxed custom-scrollbar">
-                    {logs.length === 0 ? (
-                      <div className="text-zinc-400 italic">点击右上角「运行测试」开始监控日志...</div>
-                    ) : (
-                      logs.map((log, i) => {
-                        let colorClass = "text-zinc-700";
-                        if (log.includes("✅")) colorClass = "text-emerald-500";
-                        if (log.includes("❌") || log.includes("FAILED")) colorClass = "text-rose-500";
-                        if (log.includes("🚑") || log.includes("⚠️")) colorClass = "text-amber-500";
-                        if (log.includes("🤖") || log.includes("✨")) colorClass = "text-[#10a37f]";
-                        
-                        return (
-                          <div key={i} className={`mb-1 break-words ${colorClass}`}>
-                            {log}
-                          </div>
-                        );
-                      })
-                    )}
-                    <div ref={logsEndRef} />
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Right Panel: Vision / Screenshot */}
