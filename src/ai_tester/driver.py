@@ -261,6 +261,7 @@ class PlaywrightDriver:
         self.page.wait_for_timeout(500)
 
     def _action_type(self, locator, value, force=False):
+        value = "" if value is None else str(value)
         # 现代前端框架的输入框有时候用 fill 无法触发下拉搜索，甚至元素是隐藏的(无法 clear/fill)
         # 这里改用点击后全局敲击键盘的方式，这是最贴近人类操作的稳健做法
         try:
@@ -307,6 +308,8 @@ class PlaywrightDriver:
         locator.drag_to(target_locator, force=force)
 
     def _action_press_key(self, locator, value):
+        if not value:
+            raise ValueError("press_key 缺少 key")
         self.page.keyboard.press(value)
 
     def _action_scroll(self, locator, value):

@@ -14,7 +14,6 @@ import shutil
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
-import os
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 try:
@@ -23,6 +22,7 @@ except Exception:
     from database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel, UserModel
 
 worker_semaphore = asyncio.Semaphore(3) # 最大并发数为 3
+active_runs_lock = asyncio.Lock()
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -277,6 +277,30 @@ def _suite_path(suite_id: str) -> str:
     if not suite_id.endswith(".json"):
         suite_id += ".json"
     return os.path.join(SUITES_DIR, suite_id)
+
+def _safe_script_path(name: str) -> str:
+    safe_name = os.path.basename((name or "").strip())
+    if not safe_name or safe_name in (".", "..") or safe_name != (name or "").strip():
+        raise HTTPException(status_code=400, detail={"error": "Invalid script name"})
+    if not safe_name.endswith(".py"):
+        raise HTTPException(status_code=400, detail={"error": "Invalid script name"})
+    scripts_root = os.path.realpath(SCRIPTS_DIR)
+    file_path = os.path.realpath(os.path.join(scripts_root, safe_name))
+    if not file_path.startswith(scripts_root + os.sep):
+        raise HTTPException(status_code=400, detail={"error": "Invalid script name"})
+    return file_path
+
+def _suite_doc_from_model(s: SuiteModel) -> Dict[str, Any]:
+    return {
+        "id": s.id,
+        "name": s.name,
+        "description": s.description,
+        "env_id": s.env_id,
+        "setup_case_id": s.setup_case_id,
+        "case_ids": json.loads(s.case_ids) if s.case_ids else [],
+        "created_at": s.created_at,
+        "updated_at": s.updated_at,
+    }
 
 def _list_suites() -> List[Dict[str, Any]]:
     db = SessionLocal()
@@ -1284,7 +1308,6 @@ def _normalize_recorded_steps(steps: Any) -> Dict[str, Any]:
 
 def _create_case_from_payload(data: Dict[str, Any], normalize_recorded: bool = False) -> JSONResponse:
     name = _safe_case_name(data.get("name") or f"case_{int(time.time())}")
-    case_id = f"{name}.json"
 
     tags = data.get("tags", [])
     steps = data.get("steps", [])
@@ -1385,7 +1408,8 @@ async def update_case(case_id: str, request: Request):
         _validate_case_placeholders_or_raise(next_doc)
         
         _write_case_backup_file(case_id, _case_doc_from_model(c))
-        c.steps = json.dumps(data.get("steps", []))
+        if "steps" in data:
+            c.steps = json.dumps(data.get("steps", []))
         if "tags" in data:
             c.tags = json.dumps(data.get("tags", []))
         if "variables" in data:
@@ -1711,11 +1735,14 @@ async def delete_suite_run(suite_run_id: str):
 
 @app.post("/api/suites/{suite_id}/run")
 async def run_suite(suite_id: str, env_id: Optional[str] = None):
-    p = _suite_path(suite_id)
-    if not os.path.exists(p):
-        return JSONResponse({"error": "Suite not found"}, status_code=404)
-    with open(p, "r", encoding="utf-8") as f:
-        suite = json.load(f)
+    db = SessionLocal()
+    try:
+        suite_model = db.query(SuiteModel).filter_by(id=suite_id).first()
+        if not suite_model:
+            return JSONResponse({"error": "Suite not found"}, status_code=404)
+        suite = _suite_doc_from_model(suite_model)
+    finally:
+        db.close()
 
     suite_run_id = f"suite_run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     resolved_env_id = env_id if env_id is not None else suite.get("env_id")
@@ -1725,8 +1752,8 @@ async def run_suite(suite_id: str, env_id: Optional[str] = None):
     display_case_ids = ([setup_case_id] if setup_case_id else []) + case_ids
     suite_meta = {
         "id": suite_run_id,
-        "suite_id": os.path.basename(p),
-        "suite_name": suite.get("name") or os.path.basename(p),
+        "suite_id": suite.get("id") or suite_id,
+        "suite_name": suite.get("name") or suite_id,
         "env_id": resolved_env_id,
         "status": "running",
         "started_at": int(time.time()),
@@ -1864,7 +1891,7 @@ async def _run_suite_worker(suite_run_id: str, case_ids: List[str], env_id: Opti
                 pass
             return
 
-    suite_meta["status"] = "completed"
+    suite_meta["status"] = "failed" if failed > 0 else "completed"
     suite_meta["ended_at"] = int(time.time())
     suite_meta["duration_ms"] = int((time.time() - started_ts) * 1000)
     suite_meta["current_index"] = None
@@ -1940,7 +1967,7 @@ async def push_heal_event(session_id: str, request: Request):
 
 @app.get("/api/script/{name}")
 async def get_script(name: str):
-    file_path = os.path.join(SCRIPTS_DIR, name)
+    file_path = _safe_script_path(name)
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
             return {"content": f.read()}
@@ -1969,7 +1996,9 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
     finally:
         db.close()
 
-    file_path = os.path.join(SCRIPTS_DIR, name)
+    file_path: Optional[str] = None
+    if not case:
+        file_path = _safe_script_path(name)
     resolved_script_path: Optional[str] = None
     temp_file: Optional[tempfile.NamedTemporaryFile] = None
     case_id: Optional[str] = None
@@ -2005,7 +2034,7 @@ async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_
         temp_file.write(script_content)
         temp_file.flush()
         resolved_script_path = temp_file.name
-    elif os.path.exists(file_path):
+    elif file_path and os.path.exists(file_path):
         resolved_script_path = file_path
     else:
         raise FileNotFoundError("File not found")
@@ -2049,136 +2078,132 @@ async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Opt
         
     async with worker_semaphore:
         _load_env()
-    
-    # 设置环境变量，让底层的 agent.py 和 driver.py 知道要往哪个 WS 发送截图和日志
-    # 为了 MVP 演示，我们直接劫持 stdout，并通过截屏插件推送
-    env = os.environ.copy()
-    env["PLAYWRIGHT_HEADLESS"] = "1"
-    env["AI_TESTER_WS_SESSION"] = session_id
-    env["AI_TESTER_WS_PORT"] = "8000"
-    env["AI_TESTER_INTERNAL_TOKEN"] = INTERNAL_TOKEN
-    env["AI_TESTER_RUN_HISTORY_DIR"] = _run_dir(session_id)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [os.path.join(PROJECT_ROOT, "src"), env.get("PYTHONPATH", "")]
-    ).strip(os.pathsep)
-    if os.environ.get("OPENAI_API_KEY") and not env.get("OPENAI_API_KEY"):
-        env["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
-    if extra_env:
-        for k, v in extra_env.items():
-            if v is None:
-                continue
-            env[str(k)] = str(v)
-    
-    if ws:
-        await ws.send_json({"type": "log", "message": f"🚀 开始执行用例: {os.path.basename(script_path)}"})
-        if not env.get("OPENAI_API_KEY"):
-            await ws.send_json({"type": "log", "message": "⚠️ 未检测到 OPENAI_API_KEY，本次运行将禁用 AI 自愈，仅按录制的 selector 执行。"})
-    run_meta = active_runs.get(session_id)
-    
-    try:
-        venv_python = os.path.join(PROJECT_ROOT, "venv", "bin", "python3")
-        python_exec = venv_python if os.path.exists(venv_python) else sys.executable
-        venv_bin = os.path.dirname(venv_python)
-        if os.path.exists(venv_bin):
-            env["PATH"] = os.pathsep.join([venv_bin, env.get("PATH", "")]).strip(os.pathsep)
-        process = await asyncio.create_subprocess_exec(
-            python_exec, "-m", "pytest", "-q", "-s", "--tb=short", "--disable-warnings", "-p", "ai_tester.pytest_fixtures", script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            env=env,
-            cwd=PROJECT_ROOT
-        )
+        env = os.environ.copy()
+        env["PLAYWRIGHT_HEADLESS"] = "1"
+        env["AI_TESTER_WS_SESSION"] = session_id
+        env["AI_TESTER_WS_PORT"] = "8000"
+        env["AI_TESTER_INTERNAL_TOKEN"] = INTERNAL_TOKEN
+        env["AI_TESTER_RUN_HISTORY_DIR"] = _run_dir(session_id)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [os.path.join(PROJECT_ROOT, "src"), env.get("PYTHONPATH", "")]
+        ).strip(os.pathsep)
+        if os.environ.get("OPENAI_API_KEY") and not env.get("OPENAI_API_KEY"):
+            env["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
+        if extra_env:
+            for k, v in extra_env.items():
+                if v is None:
+                    continue
+                env[str(k)] = str(v)
         
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
+        if ws:
+            await ws.send_json({"type": "log", "message": f"🚀 开始执行用例: {os.path.basename(script_path)}"})
+            if not env.get("OPENAI_API_KEY"):
+                await ws.send_json({"type": "log", "message": "⚠️ 未检测到 OPENAI_API_KEY，本次运行将禁用 AI 自愈，仅按录制的 selector 执行。"})
+        run_meta = active_runs.get(session_id)
+        
+        try:
+            venv_python = os.path.join(PROJECT_ROOT, "venv", "bin", "python3")
+            python_exec = venv_python if os.path.exists(venv_python) else sys.executable
+            venv_bin = os.path.dirname(venv_python)
+            if os.path.exists(venv_bin):
+                env["PATH"] = os.pathsep.join([venv_bin, env.get("PATH", "")]).strip(os.pathsep)
+            process = await asyncio.create_subprocess_exec(
+                python_exec, "-m", "pytest", "-q", "-s", "--tb=short", "--disable-warnings", "-p", "ai_tester.pytest_fixtures", script_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+                cwd=PROJECT_ROOT
+            )
             
-            decoded_line = line.decode('utf-8').rstrip()
-            if not decoded_line:
-                continue
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
                 
-            # 过滤掉 pytest 烦人的干扰日志
-            if decoded_line.startswith("=========================") or decoded_line.startswith("-------------------------"):
-                continue
-            if decoded_line.startswith("collected ") or "passed in " in decoded_line or "warnings summary" in decoded_line or "test_case_" in decoded_line:
-                continue
-            if "short test summary info" in decoded_line or "FAILED tests/" in decoded_line or "PASSED tests/" in decoded_line:
-                continue
-                
+                decoded_line = line.decode('utf-8').rstrip()
+                if not decoded_line:
+                    continue
+                    
+                if decoded_line.startswith("=========================") or decoded_line.startswith("-------------------------"):
+                    continue
+                if decoded_line.startswith("collected ") or "passed in " in decoded_line or "warnings summary" in decoded_line or "test_case_" in decoded_line:
+                    continue
+                if "short test summary info" in decoded_line or "FAILED tests/" in decoded_line or "PASSED tests/" in decoded_line:
+                    continue
+                    
+                current_ws = active_sessions.get(session_id)
+                if current_ws:
+                    try:
+                        await current_ws.send_json({"type": "log", "message": decoded_line})
+                    except Exception:
+                        pass
+                if run_meta is not None:
+                    run_meta["logs"].append(decoded_line)
+                    
+            await process.wait()
+            
             current_ws = active_sessions.get(session_id)
             if current_ws:
+                status = "completed" if process.returncode == 0 else "failed"
                 try:
-                    await current_ws.send_json({"type": "log", "message": decoded_line})
+                    await current_ws.send_json({"type": "status", "status": status})
                 except Exception:
                     pass
             if run_meta is not None:
-                run_meta["logs"].append(decoded_line)
+                run_meta["status"] = "completed" if process.returncode == 0 else "failed"
+                run_meta["ended_at"] = int(time.time())
+                if run_meta.get("started_at"):
+                    run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
+                if process.returncode != 0:
+                    run_meta["failure_reason"] = _infer_failure_reason(run_meta.get("logs") or [])
+                try:
+                    token_path = os.path.join(_run_dir(session_id), "token_usage.json")
+                    if os.path.exists(token_path):
+                        with open(token_path, "r", encoding="utf-8") as f:
+                            token_summary = json.load(f)
+                        run_meta["token_usage"] = token_summary.get("totals") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                        run_meta["token_summary"] = token_summary
+                except Exception:
+                    pass
                 
-        await process.wait()
-        
-        current_ws = active_sessions.get(session_id)
-        if current_ws:
-            status = "completed" if process.returncode == 0 else "failed"
-            try:
-                await current_ws.send_json({"type": "status", "status": status})
-            except Exception:
-                pass
-        if run_meta is not None:
-            run_meta["status"] = "completed" if process.returncode == 0 else "failed"
-            run_meta["ended_at"] = int(time.time())
-            if run_meta.get("started_at"):
-                run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
-            if process.returncode != 0:
-                run_meta["failure_reason"] = _infer_failure_reason(run_meta.get("logs") or [])
-            try:
-                token_path = os.path.join(_run_dir(session_id), "token_usage.json")
-                if os.path.exists(token_path):
-                    with open(token_path, "r", encoding="utf-8") as f:
-                        token_summary = json.load(f)
-                    run_meta["token_usage"] = token_summary.get("totals") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                    run_meta["token_summary"] = token_summary
-            except Exception:
-                pass
-            
-    except Exception as e:
-        current_ws = active_sessions.get(session_id)
-        if current_ws:
-            try:
-                await current_ws.send_json({"type": "log", "message": f"❌ 执行异常: {str(e)}"})
-                await current_ws.send_json({"type": "status", "status": "failed"})
-            except Exception:
-                pass
-        if run_meta is not None:
-            run_meta["status"] = "failed"
-            run_meta["ended_at"] = int(time.time())
-            if run_meta.get("started_at"):
-                run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
-            run_meta["logs"].append(f"❌ 执行异常: {str(e)}")
-            run_meta["failure_reason"] = {"category": "exception", "message": str(e)}
-            try:
-                token_path = os.path.join(_run_dir(session_id), "token_usage.json")
-                if os.path.exists(token_path):
-                    with open(token_path, "r", encoding="utf-8") as f:
-                        token_summary = json.load(f)
-                    run_meta["token_usage"] = token_summary.get("totals") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                    run_meta["token_summary"] = token_summary
-            except Exception:
-                pass
-    finally:
-        if run_meta is not None:
-            try:
-                with open(_run_meta_path(session_id), "w", encoding="utf-8") as f:
-                    json.dump(run_meta, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
-            if session_id in active_runs:
-                del active_runs[session_id]
-        if cleanup_path:
-            try:
-                os.unlink(cleanup_path)
-            except Exception:
-                pass
+        except Exception as e:
+            current_ws = active_sessions.get(session_id)
+            if current_ws:
+                try:
+                    await current_ws.send_json({"type": "log", "message": f"❌ 执行异常: {str(e)}"})
+                    await current_ws.send_json({"type": "status", "status": "failed"})
+                except Exception:
+                    pass
+            if run_meta is not None:
+                run_meta["status"] = "failed"
+                run_meta["ended_at"] = int(time.time())
+                if run_meta.get("started_at"):
+                    run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
+                run_meta["logs"].append(f"❌ 执行异常: {str(e)}")
+                run_meta["failure_reason"] = {"category": "exception", "message": str(e)}
+                try:
+                    token_path = os.path.join(_run_dir(session_id), "token_usage.json")
+                    if os.path.exists(token_path):
+                        with open(token_path, "r", encoding="utf-8") as f:
+                            token_summary = json.load(f)
+                        run_meta["token_usage"] = token_summary.get("totals") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                        run_meta["token_summary"] = token_summary
+                except Exception:
+                    pass
+        finally:
+            if run_meta is not None:
+                try:
+                    with open(_run_meta_path(session_id), "w", encoding="utf-8") as f:
+                        json.dump(run_meta, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+                if session_id in active_runs:
+                    del active_runs[session_id]
+            if cleanup_path:
+                try:
+                    os.unlink(cleanup_path)
+                except Exception:
+                    pass
 
 
 @app.websocket("/ws/run/{session_id}")

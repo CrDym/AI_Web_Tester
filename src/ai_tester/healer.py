@@ -62,9 +62,8 @@ def _derive_selector_from_dom_tree(dom_tree_str: str, target_id: str) -> Optiona
     return None
 import os
 import json
-import os
 import hashlib
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Optional
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger

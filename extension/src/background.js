@@ -46,11 +46,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             recordedActions.push(request.action);
             broadcastStatus();
             sendResponse({ status: "action_added" });
+        } else {
+            sendResponse({ status: "ignored", reason: "not_recording" });
         }
     } else if (request.type === "CLEAR_ACTIONS") {
         recordedActions = [];
         broadcastStatus();
         sendResponse({ status: "cleared" });
+    } else {
+        sendResponse({ status: "error", reason: "unknown_message_type" });
     }
     return true; // 保持消息通道打开以支持异步响应
 });

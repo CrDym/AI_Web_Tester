@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ChangeEvent, useState } from 'react';
 
 type JsonObject = Record<string, unknown>;
 type DatasetRow = Record<string, unknown>;
@@ -56,7 +56,7 @@ export default function DatasetEditor({ variables, dataset, onVariablesChange, o
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -97,18 +97,28 @@ export default function DatasetEditor({ variables, dataset, onVariablesChange, o
   };
 
   return (
-    <div className="space-y-4 h-full flex flex-col">
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 min-h-0 flex-1">
-        <div className="flex flex-col min-h-0 rounded-xl border border-zinc-200 bg-white p-4">
-          <div className="flex flex-col gap-1 mb-3">
-            <span className="text-[13px] font-semibold tracking-wide text-zinc-900">用例变量</span>
-            <span className="text-[11px] text-zinc-500 leading-relaxed">
-              默认变量，适合单次运行。可在 <code className="text-[#0e8a6a] px-1 bg-[#10a37f]/10 rounded">{'${变量名}'}</code> 中引用。内置 <code className="text-[#0e8a6a] px-1 bg-[#10a37f]/10 rounded">{'${today_ymd}'}</code> 会生成当天验证码格式，例如 260507。
-            </span>
+    <div className="h-full min-h-0 flex flex-col p-4">
+      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4 min-h-0 flex-1">
+        <div className="flex flex-col min-h-[320px] 2xl:min-h-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden shadow-sm">
+          <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 shrink-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold tracking-wide text-zinc-900 dark:text-zinc-100">用例变量</div>
+                <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  默认变量，适合单次运行。可在 <code className="text-[#0e8a6a] dark:text-[#10a37f] px-1 bg-[#10a37f]/10 rounded">{'${变量名}'}</code> 中引用。
+                </div>
+              </div>
+              <div className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
+                object
+              </div>
+            </div>
+            <div className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
+              内置 <code className="text-[#0e8a6a] dark:text-[#10a37f] px-1 bg-[#10a37f]/10 rounded">{'${today_ymd}'}</code> 会生成当天验证码格式，例如 260507。
+            </div>
           </div>
-          {variablesError && <div className="text-xs text-rose-500 mb-2">{variablesError}</div>}
+          {variablesError && <div className="mx-4 mt-3 rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-xs text-rose-600 dark:text-rose-300">{variablesError}</div>}
           <textarea
-            className="flex-1 min-h-[180px] w-full bg-white border border-zinc-200 rounded-xl p-4 text-[13px] text-zinc-900 font-mono focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all custom-scrollbar leading-relaxed"
+            className="flex-1 min-h-[220px] w-full resize-none bg-white dark:bg-zinc-950 p-4 text-[13px] text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 font-mono focus:outline-none transition-all custom-scrollbar leading-relaxed"
             value={variablesText}
             onChange={(e) => setVariablesText(e.target.value)}
             onBlur={handleVariablesBlur}
@@ -116,22 +126,28 @@ export default function DatasetEditor({ variables, dataset, onVariablesChange, o
           />
         </div>
 
-        <div className="flex flex-col min-h-0 rounded-xl border border-zinc-200 bg-white p-4">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-[13px] font-semibold tracking-wide text-zinc-900">数据集</span>
-              <span className="text-[11px] text-zinc-500 leading-relaxed">
-                多行数据会循环运行；每行会覆盖同名用例变量。数组为空时仅使用左侧用例变量运行一次。
-              </span>
+        <div className="flex flex-col min-h-[320px] 2xl:min-h-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden shadow-sm">
+          <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 shrink-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold tracking-wide text-zinc-900 dark:text-zinc-100">数据集</div>
+                <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  多行数据会循环运行；每行会覆盖同名用例变量。
+                </div>
+              </div>
+              <label className="shrink-0 cursor-pointer bg-white dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all shadow-sm">
+                导入文件
+                <input type="file" accept=".json,.csv" className="hidden" onChange={handleFileChange} />
+              </label>
             </div>
-            <label className="shrink-0 cursor-pointer bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 px-4 py-2 rounded-xl text-[11px] font-semibold transition-all">
-              导入 JSON / CSV 文件
-              <input type="file" accept=".json,.csv" className="hidden" onChange={handleFileChange} />
-            </label>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
+              <span>数组为空时仅使用左侧变量运行一次。</span>
+              <span className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-0.5 font-mono">JSON / CSV</span>
+            </div>
           </div>
-          {datasetError && <div className="text-xs text-rose-500 mb-2">{datasetError}</div>}
+          {datasetError && <div className="mx-4 mt-3 rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-xs text-rose-600 dark:text-rose-300">{datasetError}</div>}
           <textarea
-            className="flex-1 min-h-[180px] w-full bg-white border border-zinc-200 rounded-xl p-4 text-[13px] text-zinc-900 font-mono focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all custom-scrollbar leading-relaxed"
+            className="flex-1 min-h-[220px] w-full resize-none bg-white dark:bg-zinc-950 p-4 text-[13px] text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 font-mono focus:outline-none transition-all custom-scrollbar leading-relaxed"
             value={datasetText}
             onChange={(e) => setDatasetText(e.target.value)}
             onBlur={handleDatasetBlur}

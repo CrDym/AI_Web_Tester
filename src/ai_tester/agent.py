@@ -1,11 +1,10 @@
 import os
 import json
-from typing import Dict, Any, Tuple
+from typing import Dict, Any
 from .driver import PlaywrightDriver
 from .logger import logger
 from . import run_context
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
 
 class AITesterAgent:

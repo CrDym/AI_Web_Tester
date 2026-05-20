@@ -13,15 +13,11 @@
     "@tailwindcss/vite": "^4.2.2",
     "@types/react-syntax-highlighter": "^15.5.13",
     "axios": "^1.15.0",
-    "clsx": "^2.1.1",
     "lucide-react": "^1.8.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.14.0",
     "react-syntax-highlighter": "^16.1.1",
-    "tailwind-merge": "^3.5.0",
-    "tailwindcss": "^4.2.2",
-    "zustand": "^5.0.12"
+    "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

@@ -21,15 +21,15 @@
 ├── extension/            # Chrome 浏览器录制插件 (CRX)
 │   ├── manifest.json     # 插件清单
 │   └── src/              # 注入脚本，用于捕获用户的点击、输入并生成测试 JSON
-├── tests/                # 用户数据目录 (持久化存储)
-│   ├── tester.db         # SQLite 数据库：持久化存储 Cases / Runs / Suites
-│   ├── recorded_cases/   # 用例备份目录（.bak）
-│   ├── recorded_scripts/ # 运行时动态生成的 Python (Playwright) 脚本（默认不入库）
-│   └── run_history/      # 每次测试执行的运行记录、日志和截图存档（默认不入库）
-│   ├── suites/           # 套件（测试计划模板）：由多个 case_id 组成的有序集合
-│   └── suite_history/    # 套件运行记录：一次套件执行的聚合报告（关联多个 run_id）（默认不入库）
-├── docs/                 # 项目文档与规划设计
-└── logs/                 # 引擎与后端的运行时日志（默认不入库）
+├── tests/                # 用户数据目录 (运行时自动生成，默认不入库)
+│   ├── tester.db         # SQLite 数据库：主存储 Cases / Suites / Environments 等业务数据
+│   ├── recorded_cases/   # 用例备份目录（.bak），用于手工恢复上一版本
+│   ├── recorded_scripts/ # 运行时动态生成的 Python (Playwright) 脚本
+│   ├── run_history/      # 单用例运行产物：meta.json、截图、日志、token_usage
+│   └── suite_history/    # 套件运行产物：聚合 meta.json 与关联 run_id
+├── ARCHITECTURE.md       # 架构说明
+├── ROADMAP.md            # 演进路线
+└── README.md             # 使用说明
 ```
 
 ## 核心组件交互链路
@@ -52,16 +52,23 @@
    - 引擎会将自愈结果作为 `heal_events` 上报到 Web 控制台，并记录 Token 消耗；由用户在控制台中进行审计后，手工“批准更新”写回用例 steps.selector，避免误写入不稳定选择器。
 
 4. **套件执行 (Suite Run)**
-   - 套件定义保存在 `tests/suites/`，核心是 `case_ids`（按顺序串行运行）与统一的 `env_id`。
+   - 套件定义以 SQLite（`tests/tester.db` 的 `suites` 表）为主存储，核心是 `case_ids`（按顺序串行运行）与统一的 `env_id`。
    - 套件可选配置 `setup_case_id`（前置用例），用于登录等准备动作；后端通过 Playwright storageState（cookie）在套件内共享会话。
    - 运行套件时，后端会为每个 case 创建独立的 run（生成 run_id），即使中途失败也继续执行后续 case。
+   - 若任一子用例失败，套件运行最终状态为 `failed`；只有全部子用例通过时才为 `completed`。
    - 套件运行的聚合结果保存到 `tests/suite_history/`，并在前端展示通过/失败/自愈次数汇总。
 
 5. **Token 统计**
    - 所有大模型调用会记录 Token 使用情况，并在单次运行记录与套件汇总中展示总计与明细，便于成本核算与优化。
 
 ## 技术栈
-- **Frontend**: React 18, Vite, TailwindCSS, Lucide React, react-syntax-highlighter
+- **Frontend**: React 19, Vite, TailwindCSS, Lucide React, react-syntax-highlighter
 - **Backend**: FastAPI, Uvicorn, LangChain
 - **Testing Engine**: Playwright (Python)
 - **AI Models**: 兼容 OpenAI 格式的视觉大模型 (如 GPT-4o, Claude 3.5 Sonnet 等)
+
+## 当前结构约定
+- **DB 是业务主存储**：用例、套件、环境等可编辑对象以 SQLite 为准；文件系统主要保存运行产物、截图、备份与临时脚本。
+- **运行产物可清理**：`tests/run_history` 与 `tests/suite_history` 不参与业务主数据引用，后续可按保留策略清理或归档。
+- **并发执行受控**：后端通过全局 worker semaphore 限制 pytest/浏览器子进程并发，避免批量运行时耗尽本机资源。
+- **脚本路径受限**：直接读取/运行 `tests/recorded_scripts` 中脚本时只接受安全的 `.py` basename，防止路径穿越。
