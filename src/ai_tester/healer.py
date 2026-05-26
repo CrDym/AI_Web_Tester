@@ -31,6 +31,13 @@ def _sanitize_css_selector(selector: Optional[str]) -> Optional[str]:
             return None
     return s
 
+def _normalize_visible_text(text: str) -> str:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    return re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
+
+def _quote_selector_text(text: str) -> str:
+    return str(text or "").replace("\\", "\\\\").replace('"', '\\"')
+
 def _derive_selector_from_dom_tree(dom_tree_str: str, target_id: str) -> Optional[str]:
     if not isinstance(dom_tree_str, str) or not isinstance(target_id, str):
         return None
@@ -56,10 +63,36 @@ def _derive_selector_from_dom_tree(dom_tree_str: str, target_id: str) -> Optiona
             return f'{tag}[placeholder="{v}"]'
     textm = re.search(r'^"([^"]+)"', rest)
     if textm:
-        v = textm.group(1).strip()
+        raw_text = re.sub(r"\s+", " ", textm.group(1)).strip()
+        v = _normalize_visible_text(raw_text)
         if v:
-            return f'text="{v}"'
+            if tag and raw_text and raw_text != v:
+                return f'{tag}:has-text("{_quote_selector_text(raw_text)}")'
+            return f'{tag}:has-text("{_quote_selector_text(v)}")' if tag else f'text="{_quote_selector_text(v)}"'
     return None
+
+def _derive_ai_id_selector_from_dom_tree(dom_tree_str: str, target_id: str) -> Optional[str]:
+    if not isinstance(dom_tree_str, str) or not isinstance(target_id, str):
+        return None
+    if re.search(rf"^\s*-\s*\[{re.escape(target_id)}\]\s+", dom_tree_str, re.MULTILINE):
+        return f'[ai-id="{target_id}"]'
+    return None
+
+def _text_selector_is_ambiguous(dom_tree_str: str, selector: Optional[str]) -> bool:
+    if not isinstance(dom_tree_str, str) or not isinstance(selector, str):
+        return False
+    m = re.fullmatch(r'(?:[a-zA-Z0-9_-]+:has-text\(|text=)(["\'])(.*?)\1\)?', selector.strip())
+    if not m:
+        return False
+    text = _normalize_visible_text(m.group(2))
+    if not text:
+        return False
+    count = 0
+    for line in dom_tree_str.splitlines():
+        m_line = re.match(r'^\s*-\s*\[[^\]]+\]\s+\S+\s+"([^"]+)"', line)
+        if m_line and _normalize_visible_text(m_line.group(1)) == text:
+            count += 1
+    return count > 1
 import os
 import json
 import hashlib
@@ -291,20 +324,11 @@ Please find the new `id` (the number inside the brackets, e.g., 8, 9, 10) for th
                 new_id = str(result["new_target_id"])
                 new_selector = _sanitize_css_selector(result.get("new_selector"))
                 derived_selector = _derive_selector_from_dom_tree(dom_tree_str, new_id)
+                ai_id_selector = _derive_ai_id_selector_from_dom_tree(dom_tree_str, new_id)
                 if derived_selector:
-                    # 如果 AI 给出的 new_selector 和失效的 original_selector 一模一样，这说明 AI 虽然找到了元素，但生成新选择器的能力不行
-                    # 此时必须强制使用底层反推出来的 derived_selector
-                    if new_selector == original_selector:
-                        logger.warning(f"⚠️ AI 生成的新选择器 '{new_selector}' 与失效的旧选择器完全相同！已强制回退使用底层 DOM 反推选择器: '{derived_selector}'")
-                        new_selector = derived_selector
-                    elif not new_selector:
-                        new_selector = derived_selector
-                    elif new_selector == "#basic":
-                        new_selector = derived_selector
-                    elif derived_selector.startswith("#") and (not new_selector or (new_selector.startswith("#basic") and derived_selector.startswith("#basic_") and len(derived_selector) > len(new_selector))):
-                        new_selector = derived_selector
-                    elif any(k in new_selector for k in ("nth-child", "last-child", ">")) and not any(k in derived_selector for k in ("nth-child", "last-child", ">")):
-                        new_selector = derived_selector
+                    new_selector = derived_selector
+                if ai_id_selector and _text_selector_is_ambiguous(dom_tree_str, new_selector):
+                    new_selector = ai_id_selector
                 
                 # 简单评分机制：如果包含特定属性，则认为比较稳定
                 score = 50

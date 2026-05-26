@@ -4,7 +4,7 @@ import axios from 'axios';
 import CodeBlock from './components/CodeBlock';
 import DatasetEditor from './components/DatasetEditor';
 import LogStream from './components/LogStream';
-import type { CaseDoc, CaseStep, ConfirmModalOptions, EnvConfig, HealEvent, PromptModalOptions, RunDetail, RunSummary, StepType, SuiteDoc, SuiteRunDetail, SuiteRunItem, SuiteRunSummary, SuiteSummary, TestCase } from './types';
+import type { CaseDoc, CaseStep, ConfirmModalOptions, EnvConfig, HealEvent, NaturalLanguageImportItem, PromptModalOptions, RunDetail, RunSummary, StepType, SuiteDoc, SuiteRunDetail, SuiteRunItem, SuiteRunSummary, SuiteSummary, TestCase } from './types';
 import { formatRunDate, formatRunTime, formatShotTime, formatStatus, formatTokenUsage } from './utils/formatters';
 import { getFailureLabel, getFailureSeverityClass, getFailureSeverityTone, getLogKind, getLogTone } from './utils/runUi';
 
@@ -76,6 +76,7 @@ function App() {
   
   const [showSettings, setShowSettings] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [showImportNlModal, setShowImportNlModal] = useState(false);
   const [showCreateSuiteModal, setShowCreateSuiteModal] = useState(false);
   const [createSuiteName, setCreateSuiteName] = useState('');
   const [createSuiteEnvId, setCreateSuiteEnvId] = useState<string>('');
@@ -87,6 +88,13 @@ function App() {
   const [promptValue, setPromptValue] = useState('');
   const [generateForm, setGenerateForm] = useState({ name: '', start_url: '', instruction: '' });
   const [generating, setGenerating] = useState(false);
+  const [importNlText, setImportNlText] = useState('');
+  const [importNlGroup, setImportNlGroup] = useState('导入用例');
+  const [importNlStartUrl, setImportNlStartUrl] = useState('');
+  const [importNlItems, setImportNlItems] = useState<NaturalLanguageImportItem[]>([]);
+  const [importNlSelected, setImportNlSelected] = useState<number[]>([]);
+  const [importNlLoading, setImportNlLoading] = useState(false);
+  const [importNlError, setImportNlError] = useState('');
   const [apiBase, setApiBase] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [modelName, setModelName] = useState('gpt-4o-mini');
@@ -1417,6 +1425,75 @@ function App() {
     }
   };
 
+  const handleImportNlPreview = async () => {
+    if (!importNlText.trim()) {
+      setImportNlError('请输入要导入的自然语言用例内容');
+      return;
+    }
+    setImportNlLoading(true);
+    setImportNlError('');
+    try {
+      const res = await axios.post('/api/cases/import_nl/preview', {
+        text: importNlText,
+        default_group: importNlGroup,
+        default_start_url: importNlStartUrl,
+      });
+      const items = (res.data.items || []) as NaturalLanguageImportItem[];
+      setImportNlItems(items);
+      setImportNlSelected(items.filter((item) => item.valid).map((item) => item.index));
+      const tokenText = formatTokenUsage(res.data.token_usage);
+      if (tokenText) setLogs((prev) => [...prev, `🧮 自然语言导入解析 Token消耗: ${tokenText}`]);
+    } catch (e: any) {
+      setImportNlError(e.response?.data?.error || e.message || '解析失败');
+    } finally {
+      setImportNlLoading(false);
+    }
+  };
+
+  const handleImportNlConfirm = async () => {
+    const selectedCases = importNlItems
+      .filter((item) => item.valid && importNlSelected.includes(item.index))
+      .map((item) => item.case);
+    if (selectedCases.length === 0) {
+      setImportNlError('请选择至少一个可导入的用例');
+      return;
+    }
+    setImportNlLoading(true);
+    setImportNlError('');
+    try {
+      const res = await axios.post('/api/cases/import_nl/confirm', { cases: selectedCases });
+      await fetchCases();
+      const imported = res.data.imported || [];
+      const failed = res.data.failed || [];
+      setLogs((prev) => [...prev, `✅ 自然语言导入完成：成功 ${imported.length} 条，失败 ${failed.length} 条`]);
+      if (imported[0]?.id) {
+        setSelectedCase({ id: imported[0].id, name: imported[0].name, type: 'json' });
+      }
+      setShowImportNlModal(false);
+      setImportNlText('');
+      setImportNlItems([]);
+      setImportNlSelected([]);
+    } catch (e: any) {
+      setImportNlError(e.response?.data?.error || e.message || '导入失败');
+    } finally {
+      setImportNlLoading(false);
+    }
+  };
+
+  const handleImportNlFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setImportNlText(String(ev.target?.result || ''));
+      setImportNlItems([]);
+      setImportNlSelected([]);
+      setImportNlError('');
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const handleStop = async () => {
     if (selectedRunId) {
       try {
@@ -1655,6 +1732,14 @@ function App() {
             >
               <Plus className="w-4 h-4 text-white" />
               <span>NL2Case <span className="text-xs text-white/80 font-normal ml-1">自然语言生成用例</span></span>
+            </button>
+            <button
+              onClick={() => setShowImportNlModal(true)}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800 text-sm font-semibold flex items-center justify-center gap-2 transition-all"
+              title="批量导入自然语言描述的测试用例"
+            >
+              <FileJson className="w-4 h-4 text-[#10a37f]" />
+              <span>导入自然语言用例</span>
             </button>
             <div className="grid grid-cols-3 gap-2">
               <button
@@ -3361,31 +3446,44 @@ function App() {
                 </div>
               </>
             ) : (
-              <div className="flex flex-col h-[600px] space-y-4 pt-4 border-t border-zinc-200">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-zinc-600 uppercase tracking-wider">选择提示词文件</label>
-                  <select
-                    value={activePromptFile}
-                    onChange={e => setActivePromptFile(e.target.value)}
-                    className="bg-white border border-zinc-200 rounded-lg px-3 py-1.5 text-sm text-zinc-900 focus:outline-none focus:border-[#10a37f]/50"
-                  >
-                    {Object.keys(prompts).map(f => (
-                      <option key={f} value={f}>{f}</option>
-                    ))}
-                  </select>
+              <div className="h-[620px] grid grid-cols-[220px_1fr] gap-4 pt-4 border-t border-zinc-200 dark:border-zinc-800 min-h-0">
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-2 overflow-auto custom-scrollbar">
+                  {Object.keys(prompts).length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-xs text-zinc-500 dark:text-zinc-400 text-center px-4">没有找到提示词预设文件</div>
+                  ) : Object.keys(prompts).sort().map((f) => {
+                    const active = activePromptFile === f;
+                    const label = f.replace(/_system_prompt\.txt$/, '').replace(/_/g, ' ');
+                    return (
+                      <button
+                        key={f}
+                        onClick={() => setActivePromptFile(f)}
+                        className={`w-full text-left rounded-xl px-3 py-2.5 mb-1 border transition-all ${active ? 'bg-white dark:bg-zinc-950 border-[#10a37f]/30 shadow-sm text-zinc-900 dark:text-zinc-100' : 'border-transparent text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-950/70'}`}
+                      >
+                        <div className="text-xs font-semibold truncate capitalize">{label}</div>
+                        <div className="mt-0.5 text-[10px] font-mono text-zinc-400 truncate">{f}</div>
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="flex-1">
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden flex flex-col min-h-0">
+                  <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 flex items-center justify-between gap-3 shrink-0">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{activePromptFile || '未选择提示词'}</div>
+                      <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">编辑后点击底部“保存设置”生效；NL2Case 与自然语言导入均从这里读取。</div>
+                    </div>
+                    <div className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 px-2 py-1 text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
+                      {(prompts[activePromptFile] || '').length} chars
+                    </div>
+                  </div>
                   {activePromptFile ? (
                     <textarea
                       value={prompts[activePromptFile] || ''}
                       onChange={e => setPrompts({ ...prompts, [activePromptFile]: e.target.value })}
-                      className="w-full h-full bg-white border border-zinc-200 rounded-xl p-4 text-sm font-mono text-zinc-900 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all resize-none"
+                      className="flex-1 min-h-0 w-full bg-white dark:bg-zinc-950 p-4 text-[13px] leading-relaxed font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none transition-all resize-none custom-scrollbar"
                       spellCheck="false"
                     />
                   ) : (
-                    <div className="flex items-center justify-center h-full text-zinc-500 text-sm">
-                      没有找到提示词预设文件
-                    </div>
+                    <div className="flex items-center justify-center h-full text-zinc-500 dark:text-zinc-400 text-sm">请选择左侧提示词预设</div>
                   )}
                 </div>
               </div>
@@ -3587,6 +3685,109 @@ function App() {
               >
                 {creatingSuite ? <RotateCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 创建套件
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportNlModal && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-[0_18px_60px_rgba(0,0,0,0.18)] w-full max-w-6xl h-[82vh] flex flex-col overflow-hidden">
+            <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between shrink-0">
+              <div>
+                <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-3">
+                  <div className="p-2 bg-[#10a37f]/10 rounded-xl border border-[#10a37f]/20">
+                    <FileJson className="w-5 h-5 text-[#10a37f]" />
+                  </div>
+                  导入自然语言用例
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400 pl-12">批量粘贴测试场景，AI 会拆分为可导入的结构化用例。</p>
+              </div>
+              <button onClick={() => setShowImportNlModal(false)} disabled={importNlLoading} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-900 p-2 rounded-full disabled:opacity-50">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.05fr] gap-0 min-h-0 flex-1">
+              <div className="p-6 border-r border-zinc-200 dark:border-zinc-800 min-h-0 flex flex-col gap-4">
+                <div className="grid grid-cols-2 gap-3 shrink-0">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">默认分组</label>
+                    <input value={importNlGroup} onChange={(e) => setImportNlGroup(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#10a37f]/50" placeholder="导入用例" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">默认起始 URL</label>
+                    <input value={importNlStartUrl} onChange={(e) => setImportNlStartUrl(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#10a37f]/50" placeholder="可选" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3 shrink-0">
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">支持粘贴测试文档、测试点、Markdown 列表。</div>
+                  <label className="cursor-pointer shrink-0 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                    上传 txt/md
+                    <input type="file" accept=".txt,.md,.markdown" className="hidden" onChange={handleImportNlFile} />
+                  </label>
+                </div>
+                <textarea
+                  value={importNlText}
+                  onChange={(e) => { setImportNlText(e.target.value); setImportNlItems([]); setImportNlSelected([]); setImportNlError(''); }}
+                  className="flex-1 min-h-[260px] resize-none bg-zinc-50 dark:bg-black border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none focus:border-[#10a37f]/50 custom-scrollbar leading-relaxed"
+                  placeholder={`示例：\n模块：登录\n用例：手机号验证码登录成功\n步骤：\n1. 打开登录页\n2. 输入手机号 13800138000\n3. 点击获取验证码\n4. 输入验证码 260507\n5. 点击登录\n预期结果：进入首页并显示用户昵称`}
+                />
+              </div>
+
+              <div className="p-6 min-h-0 flex flex-col gap-4 bg-zinc-50/70 dark:bg-black/30">
+                <div className="flex items-center justify-between gap-3 shrink-0">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">解析预览</div>
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">确认前不会写入用例库。</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={handleImportNlPreview} disabled={importNlLoading || !importNlText.trim()} className="px-4 py-2 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+                      {importNlLoading ? <RotateCw className="w-4 h-4 animate-spin" /> : <Terminal className="w-4 h-4" />}
+                      AI 解析
+                    </button>
+                  </div>
+                </div>
+
+                {importNlError && <div className="rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300 shrink-0">{importNlError}</div>}
+
+                <div className="grid grid-cols-3 gap-2 shrink-0">
+                  <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2"><div className="text-[10px] text-zinc-500">识别用例</div><div className="text-lg font-semibold">{importNlItems.length}</div></div>
+                  <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2"><div className="text-[10px] text-zinc-500">可导入</div><div className="text-lg font-semibold text-[#0e8a6a]">{importNlItems.filter(i => i.valid).length}</div></div>
+                  <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2"><div className="text-[10px] text-zinc-500">已选择</div><div className="text-lg font-semibold">{importNlSelected.length}</div></div>
+                </div>
+
+                <div className="flex-1 min-h-0 overflow-auto custom-scrollbar space-y-2 pr-1">
+                  {importNlItems.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400 text-center">粘贴自然语言用例后点击“AI 解析”查看导入预览</div>
+                  ) : importNlItems.map((item) => {
+                    const selected = importNlSelected.includes(item.index);
+                    return (
+                      <div key={item.index} className={`rounded-2xl border bg-white dark:bg-zinc-950 p-4 ${item.valid ? 'border-zinc-200 dark:border-zinc-800' : 'border-rose-200 dark:border-rose-500/30'}`}>
+                        <div className="flex items-start gap-3">
+                          <input type="checkbox" checked={selected} disabled={!item.valid} onChange={(e) => setImportNlSelected((prev) => e.target.checked ? [...prev, item.index] : prev.filter(x => x !== item.index))} className="mt-1" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{item.case.name}</div>
+                              <span className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">{item.case.group_name || '未分组'}</span>
+                            </div>
+                            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">步骤 {item.case.steps?.length || 0} · 变量 {Object.keys(item.case.variables || {}).length} · 断言 {(item.case.steps || []).filter(s => s.type === 'assert').length}</div>
+                            {item.errors.length > 0 && <div className="mt-2 text-xs text-rose-600 dark:text-rose-300">{item.errors.join('；')}</div>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3 shrink-0">
+              <button onClick={() => setShowImportNlModal(false)} disabled={importNlLoading} className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-all disabled:opacity-50">取消</button>
+              <button onClick={handleImportNlConfirm} disabled={importNlLoading || importNlSelected.length === 0} className="px-6 py-2.5 rounded-xl text-sm font-medium text-white bg-[#10a37f] hover:bg-[#0e8a6a] flex items-center gap-2 transition-all disabled:opacity-50">
+                {importNlLoading ? <RotateCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                确认导入 {importNlSelected.length} 条
               </button>
             </div>
           </div>

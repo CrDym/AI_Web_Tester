@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 import json
 from io import BytesIO
@@ -222,6 +223,58 @@ class PlaywrightDriver:
         except Exception:
             pass
 
+    def _click_by_text_selector_fallback(self, selector: str):
+        m = re.fullmatch(r"([a-zA-Z0-9_-]+):has-text\((['\"])(.*?)\2\)", selector or "")
+        if not m:
+            return False
+        tag = m.group(1).lower()
+        text = m.group(3)
+        script = """
+        ({ tag, text }) => {
+            const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+            const target = normalize(text);
+            const visible = (el) => {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && rect.width > 0
+                    && rect.height > 0;
+            };
+            const normalizeCn = (value) => normalize(value).replace(/([\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])/g, '$1');
+            const matches = Array.from(document.querySelectorAll(tag)).filter((el) => visible(el) && normalizeCn(el.innerText || el.textContent).includes(normalizeCn(target)));
+            if (matches.length === 1) {
+                matches[0].click();
+                return { clicked: true, count: 1, mode: 'direct' };
+            }
+            const textMatches = Array.from(document.querySelectorAll('body *')).filter((el) => visible(el) && normalizeCn(el.innerText || el.textContent) === normalizeCn(target));
+            const ancestorMatches = Array.from(new Set(textMatches.map((el) => el.closest(tag)).filter((el) => el && visible(el))));
+            if (ancestorMatches.length === 1) {
+                ancestorMatches[0].click();
+                return { clicked: true, count: 1, mode: 'ancestor' };
+            }
+            if (matches.length !== 1) return { clicked: false, count: matches.length };
+            matches[0].click();
+            return { clicked: true, count: 1 };
+        }
+        """
+        frames = [self.page] + list(self.page.frames)
+        for frame in frames:
+            try:
+                result = frame.evaluate(script, {"tag": tag, "text": text})
+                if result and result.get("clicked"):
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _extract_selector_from_locator(self, locator) -> str:
+        text = str(locator).replace("Locator@", "").strip()
+        m = re.search(r"selector=(['\"])(.*?)\1", text)
+        if m:
+            return m.group(2)
+        return text
+
     # --- 内置动作处理器 ---
     def _action_click(self, locator, value, force=False):
         # 默认 timeout 为 3000ms，这样如果元素被遮挡或者逻辑不可见，能快速失败并重试 force=True
@@ -234,12 +287,15 @@ class PlaywrightDriver:
                 # 严禁默默点击第一个元素！这会导致业务逻辑没走到，直接抛出异常让外层自愈
                 raise Exception(f"定位器匹配到了多个元素，违反了唯一性原则，无法执行点击: {str(e)}")
             elif "timeout" in err_msg and not force:
-                # 第一次尝试超时，直接抛出给外层进行 force=True 的重试
+                selector = self._extract_selector_from_locator(locator)
+                if self._click_by_text_selector_fallback(selector):
+                    self.page.wait_for_timeout(500)
+                    return
                 raise e
             elif "timeout" in err_msg and force:
                 # 即使是 force=True 也超时了，说明该元素极大概率由于 DOM 重绘导致 stale (如下拉框关闭、React 重新渲染)
                 # 此时我们尝试利用页面上最新的相同 selector 重新获取一遍元素（Stale Element Recovery）
-                selector = str(locator).replace("Locator@", "").strip()
+                selector = self._extract_selector_from_locator(locator)
                 if "ai-id" in selector:
                     # 如果是 ai-id 超时，说明临时注入的 id 已经随着重绘彻底消失了，无法 recovery，只能认命
                     raise Exception(f"元素已失效或不可见 (可能已从 DOM 中移除或发生重绘): {selector}")
@@ -247,6 +303,9 @@ class PlaywrightDriver:
                 try:
                     self.page.locator(selector).first.click(force=True, timeout=1000)
                 except Exception:
+                    if self._click_by_text_selector_fallback(selector):
+                        self.page.wait_for_timeout(500)
+                        return
                     raise e
             else:
                 raise e

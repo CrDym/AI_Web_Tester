@@ -176,6 +176,7 @@ export interface CaseStep {
 export interface CaseDoc {
   id: string;
   name: string;
+  group_name?: string;
   start_url?: string | null;
   steps: CaseStep[];
   tags?: string[];
@@ -187,4 +188,11 @@ export interface EnvConfig {
   id: string;
   name: string;
   base_url: string;
+}
+
+export interface NaturalLanguageImportItem {
+  index: number;
+  case: CaseDoc;
+  valid: boolean;
+  errors: string[];
 }

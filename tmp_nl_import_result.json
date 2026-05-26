@@ -1,0 +1,11 @@
+{
+  "status": "success",
+  "imported": [
+    {
+      "index": 0,
+      "id": "case_1779248654165_76407c9f_自然语言验证导入测试.json",
+      "name": "自然语言验证导入测试"
+    }
+  ],
+  "failed": []
+}
