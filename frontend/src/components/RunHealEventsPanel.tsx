@@ -1,4 +1,4 @@
-import { Eye } from 'lucide-react';
+import { CheckCircle2, Eye, ShieldCheck } from 'lucide-react';
 import type { HealEvent, RunDetail } from '../types';
 import { formatTokenUsage } from '../utils/formatters';
 import { getHealApprovalCandidate } from '../utils/healApproval';
@@ -26,29 +26,44 @@ export default function RunHealEventsPanel({
 
   return (
     <div className="pt-2 border-t border-zinc-200">
-      <div className="text-xs font-semibold text-zinc-500 mb-3">
-        自愈记录（{events.length}）
+      <div className="text-xs font-semibold text-zinc-500 mb-3 flex items-center gap-2">
+        <ShieldCheck className="w-3.5 h-3.5 text-[#10a37f]" />
+        SOLO 自愈审计（{events.length}）
       </div>
       {events.length === 0 ? (
-        <div className="text-xs text-zinc-500">本次运行未发生自愈</div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+          本次运行未触发自愈，所有步骤按原定位完成。
+        </div>
       ) : (
         <div className="space-y-2 max-h-48 overflow-auto pr-1">
           {events.map((event, idx) => (
             <div key={idx} className="rounded-xl border border-zinc-200 bg-white p-2">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-xl-full ${event.success ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                <div className="text-xs text-zinc-900 truncate flex-1">{event.intent || '自愈'}</div>
+                <span className={`w-2 h-2 rounded-full ${event.success ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                <div className="text-xs font-semibold text-zinc-900 truncate flex-1">
+                  {event.success ? 'SOLO 已找到更稳定的定位方式' : 'SOLO 自愈未完成'}
+                </div>
                 <div className="text-[10px] text-zinc-500 font-mono shrink-0">{event.source || ''}</div>
               </div>
+              <div className="mt-1 text-[11px] text-zinc-600 break-words">{event.intent || '未记录测试意图'}</div>
               <div className="mt-1 text-[10px] text-zinc-500 font-mono">
                 {formatTokenUsage(event.token_usage)}
               </div>
-              <div className="mt-1 text-[11px] text-zinc-500 font-mono break-all">
-                {event.original_selector || ''}
-              </div>
+              {event.original_selector ? (
+                <div className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5">
+                  <div className="text-[10px] font-semibold text-zinc-500">原 selector</div>
+                  <div className="mt-0.5 text-[11px] text-zinc-500 font-mono break-all">{event.original_selector}</div>
+                </div>
+              ) : null}
               {event.new_selector || event.new_id ? (
-                <div className="mt-1 text-[11px] text-zinc-600 font-mono break-all">
-                  {event.new_selector ? event.new_selector : `id:${event.new_id}`}
+                <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                  <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
+                    <CheckCircle2 className="w-3 h-3" />
+                    新 selector
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-emerald-800 font-mono break-all">
+                    {event.new_selector ? event.new_selector : `id:${event.new_id}`}
+                  </div>
                 </div>
               ) : null}
               {event.reason ? (
@@ -129,7 +144,7 @@ function ApproveHealButton({
           : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
       } ${approving ? 'opacity-70' : ''} disabled:opacity-60`}
     >
-      {approved ? '已批准' : approving ? '审批中...' : '批准更新'}
+      {approved ? '已批准' : approving ? '审批中...' : '批准写回'}
     </button>
   );
 }

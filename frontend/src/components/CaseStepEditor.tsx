@@ -1,3 +1,4 @@
+import { Copy, GripVertical, Trash2 } from 'lucide-react';
 import type { CaseDoc, CaseStep, StepType } from '../types';
 
 interface CaseStepEditorProps {
@@ -28,21 +29,34 @@ export default function CaseStepEditor({
           className="col-span-5 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15"
         />
       </div>
-      <div className="text-xs text-zinc-500">步骤</div>
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">意图步骤</div>
+        <div className="text-[11px] text-zinc-500">优先写清测试意图，selector 可留空交给 SOLO 定位。</div>
+      </div>
       <div className="space-y-2">
         {caseDoc.steps.map((s, idx) => (
-          <div key={idx} className={`rounded-xl border border-zinc-200 bg-white p-4 space-y-3 shadow-sm hover:bg-zinc-50 transition-colors ${s.disabled ? 'opacity-50 grayscale' : ''}`}>
+          <div key={idx} className={`rounded-2xl border border-zinc-200 bg-white p-4 space-y-4 shadow-sm hover:bg-zinc-50 transition-colors ${s.disabled ? 'opacity-50 grayscale' : ''}`}>
             <div className="flex items-center justify-between">
-              <div className="text-xs text-zinc-400 font-mono">步骤 {idx + 1}</div>
+              <div className="flex items-center gap-2 min-w-0">
+                <GripVertical className="w-4 h-4 text-zinc-300 shrink-0" />
+                <div className="text-xs text-zinc-400 font-mono">STEP {idx + 1}</div>
+                <div className="px-2 py-1 rounded-lg border border-[#10a37f]/20 bg-[#10a37f]/10 text-[10px] font-semibold text-[#0e8a6a]">
+                  {s.type || 'click'}
+                </div>
+              </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => onMoveStep(idx, 'up')} disabled={idx === 0} className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30">↑</button>
                 <button onClick={() => onMoveStep(idx, 'down')} disabled={idx === caseDoc.steps.length - 1} className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30">↓</button>
-                <button onClick={() => onDuplicateStep(idx)} className="text-xs text-[#0e8a6a] hover:text-[#0e8a6a]">复制</button>
+                <button onClick={() => onDuplicateStep(idx)} className="p-1.5 rounded-lg text-[#0e8a6a] hover:bg-[#10a37f]/10" title="复制步骤">
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
                 <button onClick={() => onUpdateStep(idx, { disabled: !s.disabled })} className="text-xs text-zinc-500 hover:text-[#0e8a6a]">{s.disabled ? '启用' : '禁用'}</button>
-                <button onClick={() => onRemoveStep(idx)} className="text-xs text-rose-700 hover:text-rose-800">删除</button>
+                <button onClick={() => onRemoveStep(idx)} className="p-1.5 rounded-lg text-rose-700 hover:bg-rose-50" title="删除步骤">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               <select
                 value={s.type}
                 onChange={(e) => onUpdateStep(idx, { type: e.target.value as StepType })}
@@ -64,7 +78,7 @@ export default function CaseStepEditor({
                 <select
                   value={s.assert_type || 'text'}
                   onChange={(e) => onUpdateStep(idx, { assert_type: e.target.value as CaseStep['assert_type'] })}
-                  className="col-span-2 bg-white border border-zinc-200 rounded-xl px-2 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
+                  className="md:col-span-2 bg-white border border-zinc-200 rounded-xl px-2 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
                 >
                   <option value="text">页面包含文本</option>
                   <option value="url">URL 包含</option>
@@ -74,18 +88,24 @@ export default function CaseStepEditor({
                 <input
                   value={s.intent || ''}
                   onChange={(e) => onUpdateStep(idx, { intent: e.target.value })}
-                  className="col-span-2 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
-                  placeholder="意图（建议写清楚，如：点击登录按钮）"
+                  className="md:col-span-2 bg-white border border-[#10a37f]/25 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15"
+                  placeholder="测试意图，例如：点击登录按钮"
                 />
               )}
             </div>
             {(!s.type || !['wait', 'scroll', 'press_key'].includes(s.type) || (s.type === 'assert' && s.assert_type === 'visible')) ? (
-              <input
-                value={s.selector || ''}
-                onChange={(e) => onUpdateStep(idx, { selector: e.target.value })}
-                className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50 font-mono"
-                placeholder="selector（Playwright 支持）"
-              />
+              <div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <label className="text-[11px] font-semibold text-zinc-500">定位 selector（可选）</label>
+                  {!s.selector ? <span className="text-[10px] text-zinc-400">SOLO 将根据意图自动定位</span> : null}
+                </div>
+                <input
+                  value={s.selector || ''}
+                  onChange={(e) => onUpdateStep(idx, { selector: e.target.value })}
+                  className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50 font-mono"
+                  placeholder="可选：Playwright selector"
+                />
+              </div>
             ) : null}
             {(['input', 'wait', 'select_option', 'set_checked', 'press_key', 'scroll'].includes(s.type || '') || (s.type === 'assert' && s.assert_type !== 'visible')) ? (
               <input

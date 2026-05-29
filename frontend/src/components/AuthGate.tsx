@@ -1,4 +1,5 @@
-import { KeyRound, Loader2, SquareTerminal, UserRound } from 'lucide-react';
+import { BrainCircuit, History, KeyRound, Loader2, ShieldCheck, UserRound } from 'lucide-react';
+import SoloLogo from './SoloLogo';
 
 interface AuthGateProps {
   authMode: 'login' | 'setup';
@@ -31,39 +32,50 @@ export default function AuthGate({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#f7f7f8] dark:bg-black">
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_25%_20%,rgba(16,163,127,0.08),transparent_55%),radial-gradient(circle_at_70%_0%,rgba(0,0,0,0.06),transparent_55%)]" />
-      <div className="relative w-[420px] max-w-[92vw] px-4">
-        <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-[0_12px_48px_rgba(0,0,0,0.08)]">
-          <div className="px-8 pt-8 pb-7">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-[#10a37f]/10 border border-[#10a37f]/20 flex items-center justify-center">
-                  <SquareTerminal className="w-5 h-5 text-[#10a37f]" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-tight">SOLO 测试控制台</div>
-                  <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">登录后才能访问任何数据</div>
-                </div>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f6f7f6] dark:bg-black px-4 py-8">
+      <div className="min-h-full flex items-center justify-center">
+        <div className="w-[520px] max-w-[94vw]">
+          <div className="mb-4 flex items-center justify-center gap-2 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+            <span className="h-px w-10 bg-zinc-200 dark:bg-zinc-800" />
+            Intent · Healing · Audit
+            <span className="h-px w-10 bg-zinc-200 dark:bg-zinc-800" />
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-[0_20px_70px_rgba(24,24,27,0.10)]">
+            <div className="px-8 pt-8 pb-6">
+              <div className="flex justify-center">
+                <SoloLogo
+                  orientation="stacked"
+                  subtitle=""
+                  className="flex flex-col items-center"
+                />
               </div>
-              <div className="shrink-0 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1 flex gap-1">
+
+              <div className="mt-6">
+                <h1 className="text-2xl font-semibold leading-tight text-zinc-950 dark:text-zinc-50">
+                  {authMode === 'setup' ? '创建管理员账号' : '欢迎回来'}
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                  {authMode === 'setup' ? '首次初始化 SOLO，之后用登录入口进入测试工作台。' : '继续管理自然语言用例、浏览器运行和自愈审计记录。'}
+                </p>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-1 grid grid-cols-2 gap-1">
                 <button
                   onClick={() => selectMode('login')}
-                  className={`px-3 py-1.5 text-xs rounded-xl transition ${authMode === 'login' ? 'bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 shadow-sm border border-zinc-200 dark:border-zinc-800' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'}`}
+                  className={`px-3 py-2 text-xs rounded-xl transition ${authMode === 'login' ? 'bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 shadow-sm border border-zinc-200 dark:border-zinc-800' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'}`}
                 >
                   登录
                 </button>
                 <button
                   onClick={() => selectMode('setup')}
-                  className={`px-3 py-1.5 text-xs rounded-xl transition ${authMode === 'setup' ? 'bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 shadow-sm border border-zinc-200 dark:border-zinc-800' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'}`}
+                  className={`px-3 py-2 text-xs rounded-xl transition ${authMode === 'setup' ? 'bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 shadow-sm border border-zinc-200 dark:border-zinc-800' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'}`}
                 >
-                  初始化
+                  注册
                 </button>
               </div>
-            </div>
 
-            <div className="mt-6 space-y-4">
-              <div className="space-y-3">
+              <div className="mt-5 space-y-3">
                 <div className="relative">
                   <div className="absolute inset-y-0 left-3 flex items-center text-zinc-400">
                     <UserRound className="w-4 h-4" />
@@ -71,7 +83,7 @@ export default function AuthGate({
                   <input
                     value={username}
                     onChange={(e) => onUsernameChange(e.target.value)}
-                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl pl-10 pr-3 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#10a37f]/15 focus:border-[#10a37f]/50"
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-3 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#10a37f]/15 focus:border-[#10a37f]/50"
                     placeholder="用户名"
                     autoFocus
                   />
@@ -84,7 +96,7 @@ export default function AuthGate({
                     type="password"
                     value={password}
                     onChange={(e) => onPasswordChange(e.target.value)}
-                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl pl-10 pr-3 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#10a37f]/15 focus:border-[#10a37f]/50"
+                    className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-10 pr-3 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#10a37f]/15 focus:border-[#10a37f]/50"
                     placeholder="密码"
                     onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(); }}
                   />
@@ -92,7 +104,7 @@ export default function AuthGate({
               </div>
 
               {error ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
+                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
                   {error}
                 </div>
               ) : null}
@@ -100,7 +112,7 @@ export default function AuthGate({
               <button
                 onClick={onSubmit}
                 disabled={submitting || !username.trim() || !password}
-                className="w-full bg-[#10a37f] hover:bg-[#0e8a6a] disabled:opacity-50 disabled:hover:bg-[#10a37f] text-white text-sm font-semibold px-4 py-3 rounded-2xl flex items-center justify-center gap-2"
+                className="mt-5 w-full bg-[#10a37f] hover:bg-[#0e8a6a] disabled:opacity-50 disabled:hover:bg-[#10a37f] text-white text-sm font-semibold px-4 py-3 rounded-xl flex items-center justify-center gap-2"
               >
                 {submitting ? (
                   <>
@@ -108,12 +120,23 @@ export default function AuthGate({
                     <span>验证中...</span>
                   </>
                 ) : (
-                  <span>{authMode === 'setup' ? '初始化并登录' : '登录'}</span>
+                  <span>{authMode === 'setup' ? '创建账号并进入 SOLO' : '进入 SOLO'}</span>
                 )}
               </button>
 
-              <div className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                {authMode === 'setup' ? '首次使用：创建第一个账号（仅一次）' : '提示：如果已初始化，请直接登录'}
+              <div className="mt-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-3">
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { icon: BrainCircuit, label: '意图' },
+                    { icon: ShieldCheck, label: '自愈' },
+                    { icon: History, label: '审计' },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-2 py-2 text-center">
+                      <item.icon className="mx-auto w-4 h-4 text-[#10a37f]" />
+                      <div className="mt-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-200">{item.label}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

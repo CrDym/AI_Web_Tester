@@ -1,8 +1,9 @@
-import { Check, FileJson, Folder, FolderOpen, History, ListChecks, Moon, Pencil, Plus, RefreshCw, RotateCw, Settings, SquareTerminal, Sun, Tag, Trash2, XCircle, Search } from 'lucide-react';
+import { BrainCircuit, Check, FileJson, Folder, FolderOpen, History, ListChecks, Moon, Pencil, Plus, RefreshCw, RotateCw, Settings, ShieldCheck, SquareTerminal, Sun, Tag, Trash2, XCircle, Search } from 'lucide-react';
 import type { Dispatch, MouseEvent, RefObject, SetStateAction } from 'react';
 import type { RunSummary, SuiteDoc, SuiteRunDetail, SuiteSummary, TestCase } from '../types';
 import { formatRunDate, formatRunTime, formatStatus, formatTokenUsage } from '../utils/formatters';
 import { getFailureLabel, getFailureSeverityClass } from '../utils/runUi';
+import SoloLogo from './SoloLogo';
 
 type SidebarNav = 'cases' | 'suites' | 'runs';
 
@@ -140,13 +141,26 @@ export default function CaseSidebar({
   return (
 <div className="w-[320px] shrink-0 bg-[#f9f9fa] dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex flex-col z-20 min-h-0">
         <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-[#f9f9fa] dark:bg-zinc-950">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-9 h-9 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center shrink-0">
-              <SquareTerminal className="text-[#10a37f] w-5 h-5" />
+          <SoloLogo
+            className="flex items-center gap-2 min-w-0"
+            subtitle="AI Test Workspace"
+            titleClassName="text-lg font-semibold text-zinc-900 dark:text-zinc-100 leading-none truncate"
+            subtitleClassName="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400 font-mono tracking-wider uppercase truncate"
+          />
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-2">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700 dark:text-zinc-200">
+                <BrainCircuit className="w-3.5 h-3.5 text-[#10a37f]" />
+                意图驱动
+              </div>
+              <div className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">自然语言生成和编辑</div>
             </div>
-            <div className="flex flex-col min-w-0">
-              <h1 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-tight truncate">SOLO 测试</h1>
-              <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono tracking-wider uppercase truncate">系统运行中</div>
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-2">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700 dark:text-zinc-200">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#10a37f]" />
+                自愈审计
+              </div>
+              <div className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">定位失败自动修复</div>
             </div>
           </div>
           <div className="mt-3 flex flex-col gap-2">
@@ -156,7 +170,7 @@ export default function CaseSidebar({
               title="使用自然语言生成测试用例"
             >
               <Plus className="w-4 h-4 text-white" />
-              <span>NL2Case <span className="text-xs text-white/80 font-normal ml-1">自然语言生成用例</span></span>
+              <span>让 SOLO 生成用例</span>
             </button>
             <button
               onClick={() => setShowImportNlModal(true)}
@@ -444,7 +458,7 @@ export default function CaseSidebar({
                     <div className="h-8 inline-flex items-center rounded-xl bg-white border border-zinc-200 shadow-sm divide-x divide-zinc-200 overflow-hidden">
                       <button
                         onClick={selectAllVisibleRuns}
-                        disabled={!selectedCase || visibleRuns.length === 0}
+                        disabled={visibleRuns.length === 0}
                         className="h-8 px-3 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 min-w-[52px]"
                         title="全选当前列表"
                       >
