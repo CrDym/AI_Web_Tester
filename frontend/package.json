@@ -6,17 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "tsc -p tsconfig.test.json && node node_modules/.tmp/tests/utils/__tests__/formatters.test.js && node node_modules/.tmp/tests/utils/__tests__/healApproval.test.js && node node_modules/.tmp/tests/utils/__tests__/runUi.test.js",
+    "e2e:smoke": "../venv/bin/python ../tools/e2e_smoke.py",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
-    "@types/react-syntax-highlighter": "^15.5.13",
     "axios": "^1.15.0",
     "lucide-react": "^1.8.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-syntax-highlighter": "^16.1.1",
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {

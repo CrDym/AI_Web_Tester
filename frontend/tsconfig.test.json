@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./node_modules/.tmp/tests",
+    "rootDir": "./src",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "allowImportingTsExtensions": false
+  },
+  "include": [
+    "src/utils/**/*.ts"
+  ]
+}

@@ -32,6 +32,8 @@ export const formatStatus = (status: string | undefined | null) => {
     case 'completed': return '已完成';
     case 'failed': return '执行失败';
     case 'running': return '运行中';
+    case 'stopped': return '已停止';
+    case 'timeout': return '已超时';
     case 'pending': return '等待中';
     default: return status;
   }

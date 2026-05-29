@@ -3,26 +3,87 @@ import time
 import asyncio
 import json
 import uuid
-import tempfile
 import base64
 import re
-import hashlib
-import hmac
 import secrets
-import sys
 import shutil
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 try:
-    from web_server.database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel, UserModel
+    from web_server.auth_utils import (
+        extract_bearer_token,
+        is_valid_token,
+        now_ts,
+    )
+    from web_server.database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel
+    from web_server.runtime_utils import (
+        DEFAULT_RUN_TIMEOUT_SECONDS,
+        RUN_STATUS_COMPLETED,
+        RUN_STATUS_FAILED,
+        RUN_STATUS_RUNNING,
+        RUN_STATUS_STOPPED,
+        RUN_STATUS_TIMEOUT,
+        RUN_TERMINAL_STATUSES,
+        mask_secret,
+        safe_child_path,
+    )
+    from web_server.runner import (
+        active_processes,
+        active_runs,
+        active_runs_lock,
+        active_sessions,
+        RunnerDeps,
+        start_run,
+        stop_active_run,
+        terminate_process,
+        worker_semaphore,
+    )
+    from web_server.routes_auth import create_auth_router
+    from web_server.routes_case_generation import CaseGenerationRouteDeps, create_case_generation_router
+    from web_server.routes_cases import CasesRouteDeps, create_cases_router
+    from web_server.routes_config import ConfigRouteDeps, create_config_router
+    from web_server.routes_runs import RunsRouteDeps, create_runs_router
+    from web_server.routes_suites import SuiteRouteDeps, create_suites_router
+    from web_server.suite_runner import SuiteRunnerDeps, run_suite_worker, wait_run_finished
 except Exception:
-    from database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel, UserModel
+    from auth_utils import (
+        extract_bearer_token,
+        is_valid_token,
+        now_ts,
+    )
+    from database import SessionLocal, CaseModel, SuiteModel, RunModel, SuiteRunModel
+    from runtime_utils import (
+        DEFAULT_RUN_TIMEOUT_SECONDS,
+        RUN_STATUS_COMPLETED,
+        RUN_STATUS_FAILED,
+        RUN_STATUS_RUNNING,
+        RUN_STATUS_STOPPED,
+        RUN_STATUS_TIMEOUT,
+        RUN_TERMINAL_STATUSES,
+        mask_secret,
+        safe_child_path,
+    )
+    from runner import (
+        active_processes,
+        active_runs,
+        active_runs_lock,
+        active_sessions,
+        RunnerDeps,
+        start_run,
+        stop_active_run,
+        terminate_process,
+        worker_semaphore,
+    )
+    from routes_auth import create_auth_router
+    from routes_case_generation import CaseGenerationRouteDeps, create_case_generation_router
+    from routes_cases import CasesRouteDeps, create_cases_router
+    from routes_config import ConfigRouteDeps, create_config_router
+    from routes_runs import RunsRouteDeps, create_runs_router
+    from routes_suites import SuiteRouteDeps, create_suites_router
+    from suite_runner import SuiteRunnerDeps, run_suite_worker, wait_run_finished
 
-worker_semaphore = asyncio.Semaphore(3) # 最大并发数为 3
-active_runs_lock = asyncio.Lock()
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -30,53 +91,35 @@ app = FastAPI()
 
 from fastapi.middleware.cors import CORSMiddleware
 
+def _parse_csv_env(name: str, default: List[str]) -> List[str]:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    values = [x.strip() for x in raw.split(",") if x.strip()]
+    return values or default
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_parse_csv_env("AI_TESTER_CORS_ORIGINS", [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-AUTH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
 INTERNAL_TOKEN = secrets.token_urlsafe(32)
 active_tokens: Dict[str, Dict[str, Any]] = {}
 
 def _now_ts() -> int:
-    return int(time.time())
-
-def _hash_password(password: str, salt: str) -> str:
-    dk = hashlib.pbkdf2_hmac(
-        "sha256",
-        (password or "").encode("utf-8"),
-        (salt or "").encode("utf-8"),
-        120000,
-    )
-    return dk.hex()
+    return now_ts()
 
 def _is_valid_token(token: str) -> bool:
-    tok = (token or "").strip()
-    if not tok:
-        return False
-    rec = active_tokens.get(tok)
-    if not rec:
-        return False
-    exp = int(rec.get("exp") or 0)
-    if exp and _now_ts() >= exp:
-        try:
-            del active_tokens[tok]
-        except Exception:
-            pass
-        return False
-    return True
+    return is_valid_token(active_tokens, token)
 
 def _extract_bearer_token(auth_header: str) -> str:
-    raw = (auth_header or "").strip()
-    if not raw:
-        return ""
-    if raw.lower().startswith("bearer "):
-        return raw[7:].strip()
-    return ""
+    return extract_bearer_token(auth_header)
 
 @app.middleware("http")
 async def _auth_middleware(request: Request, call_next):
@@ -86,6 +129,10 @@ async def _auth_middleware(request: Request, call_next):
     if path.startswith("/api/auth/"):
         return await call_next(request)
     if path == "/api/recorder/cases":
+        token = (request.headers.get("X-Recorder-Token") or "").strip()
+        expected = (os.environ.get("AI_TESTER_RECORDER_TOKEN") or "").strip()
+        if expected and token != expected:
+            return JSONResponse({"error": "unauthorized recorder"}, status_code=401)
         return await call_next(request)
     if path.startswith("/api/internal/"):
         token = (request.headers.get("X-Internal-Token") or "").strip()
@@ -97,70 +144,7 @@ async def _auth_middleware(request: Request, call_next):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return await call_next(request)
 
-class AuthSetupReq(BaseModel):
-    username: str
-    password: str
-
-class AuthLoginReq(BaseModel):
-    username: str
-    password: str
-
-@app.post("/api/auth/setup")
-async def auth_setup(req: AuthSetupReq):
-    username = (req.username or "").strip()
-    password = str(req.password or "")
-    if not username or not password:
-        return JSONResponse({"error": "Missing parameters"}, status_code=400)
-    db = SessionLocal()
-    try:
-        if db.query(UserModel).count() > 0:
-            return JSONResponse({"error": "Already initialized"}, status_code=409)
-        if db.query(UserModel).filter_by(username=username).first():
-            return JSONResponse({"error": "User already exists"}, status_code=409)
-        salt = secrets.token_hex(16)
-        password_hash = _hash_password(password, salt)
-        u = UserModel(
-            username=username,
-            password_hash=password_hash,
-            salt=salt,
-            created_at=_now_ts(),
-            last_login_at=None,
-        )
-        db.add(u)
-        db.commit()
-        return JSONResponse({"status": "success"})
-    finally:
-        db.close()
-
-@app.post("/api/auth/login")
-async def auth_login(req: AuthLoginReq):
-    username = (req.username or "").strip()
-    password = str(req.password or "")
-    if not username or not password:
-        return JSONResponse({"error": "Missing parameters"}, status_code=400)
-    db = SessionLocal()
-    try:
-        u = db.query(UserModel).filter_by(username=username).first()
-        if not u:
-            return JSONResponse({"error": "Invalid credentials"}, status_code=401)
-        expected = _hash_password(password, getattr(u, "salt", "") or "")
-        if not hmac.compare_digest(expected, getattr(u, "password_hash", "") or ""):
-            return JSONResponse({"error": "Invalid credentials"}, status_code=401)
-        u.last_login_at = _now_ts()
-        db.commit()
-        token = secrets.token_urlsafe(32)
-        active_tokens[token] = {"username": username, "exp": _now_ts() + AUTH_TOKEN_TTL_SECONDS}
-        return JSONResponse({"status": "success", "token": token, "username": username})
-    finally:
-        db.close()
-
-@app.get("/api/auth/me")
-async def auth_me(request: Request):
-    token = _extract_bearer_token(request.headers.get("Authorization") or "")
-    if not _is_valid_token(token):
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    rec = active_tokens.get(token) or {}
-    return JSONResponse({"status": "success", "username": rec.get("username")})
+app.include_router(create_auth_router(active_tokens))
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "tests", "recorded_scripts")
@@ -173,6 +157,8 @@ SUITES_DIR = os.path.join(PROJECT_ROOT, "tests", "suites")
 os.makedirs(SUITES_DIR, exist_ok=True)
 SUITE_RUNS_DIR = os.path.join(PROJECT_ROOT, "tests", "suite_history")
 os.makedirs(SUITE_RUNS_DIR, exist_ok=True)
+ENVS_FILE = os.path.join(PROJECT_ROOT, "tests", "environments.json")
+PROMPTS_DIR = os.environ.get("AI_TESTER_PROMPTS_DIR") or os.path.join(PROJECT_ROOT, "src", "ai_tester", "prompts")
 
 try:
     from dotenv import load_dotenv
@@ -186,10 +172,6 @@ def _load_env() -> None:
         load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=True)
     except Exception:
         pass
-
-# 存储活跃的 websocket 连接，用于向前端推送日志
-active_sessions = {}
-active_runs: Dict[str, Dict[str, Any]] = {}
 
 def _safe_case_name(name: str) -> str:
     name = (name or "").strip()
@@ -279,15 +261,11 @@ def _suite_path(suite_id: str) -> str:
     return os.path.join(SUITES_DIR, suite_id)
 
 def _safe_script_path(name: str) -> str:
-    safe_name = os.path.basename((name or "").strip())
-    if not safe_name or safe_name in (".", "..") or safe_name != (name or "").strip():
-        raise HTTPException(status_code=400, detail={"error": "Invalid script name"})
-    if not safe_name.endswith(".py"):
-        raise HTTPException(status_code=400, detail={"error": "Invalid script name"})
-    scripts_root = os.path.realpath(SCRIPTS_DIR)
-    file_path = os.path.realpath(os.path.join(scripts_root, safe_name))
-    if not file_path.startswith(scripts_root + os.sep):
-        raise HTTPException(status_code=400, detail={"error": "Invalid script name"})
+    file_path, _ = safe_child_path(SCRIPTS_DIR, name, suffix=".py", error_label="Invalid script name")
+    return file_path
+
+def _safe_prompt_path(filename: str) -> str:
+    file_path, _ = safe_child_path(PROMPTS_DIR, filename, suffix=".txt", error_label="Invalid filename")
     return file_path
 
 def _suite_doc_from_model(s: SuiteModel) -> Dict[str, Any]:
@@ -301,6 +279,46 @@ def _suite_doc_from_model(s: SuiteModel) -> Dict[str, Any]:
         "created_at": s.created_at,
         "updated_at": s.updated_at,
     }
+
+def _normalize_suite_case_ids(raw_case_ids: Any, setup_case_id: Optional[str] = None) -> List[str]:
+    case_ids: List[str] = []
+    seen = set()
+    setup_case_id = str(setup_case_id or "").strip() or None
+    if not isinstance(raw_case_ids, list):
+        return case_ids
+    for cid in raw_case_ids:
+        cid = str(cid or "").strip()
+        if not cid or cid == setup_case_id or cid in seen:
+            continue
+        seen.add(cid)
+        case_ids.append(cid)
+    return case_ids
+
+def _validate_suite_case_refs(db, case_ids: List[str], setup_case_id: Optional[str] = None) -> List[str]:
+    wanted = [str(x or "").strip() for x in ([setup_case_id] if setup_case_id else []) + (case_ids or [])]
+    wanted = [x for x in wanted if x]
+    if not wanted:
+        return []
+    existing = {row.id for row in db.query(CaseModel).filter(CaseModel.id.in_(wanted)).all()}
+    return [cid for cid in wanted if cid not in existing]
+
+def _remove_case_from_suites(db, case_id: str) -> int:
+    updated = 0
+    now = int(time.time())
+    suites = db.query(SuiteModel).all()
+    for suite in suites:
+        changed = False
+        if suite.setup_case_id == case_id:
+            suite.setup_case_id = None
+            changed = True
+        case_ids = json.loads(suite.case_ids) if suite.case_ids else []
+        if isinstance(case_ids, list) and case_id in case_ids:
+            suite.case_ids = json.dumps([cid for cid in case_ids if cid != case_id])
+            changed = True
+        if changed:
+            suite.updated_at = now
+            updated += 1
+    return updated
 
 def _list_suites() -> List[Dict[str, Any]]:
     db = SessionLocal()
@@ -904,426 +922,25 @@ async def upload_script(request: Request):
     data = await request.json()
     script_content = data.get("script")
     name = data.get("name", f"test_record_{int(time.time())}.py")
-    
+
     if not name.endswith(".py"):
         name += ".py"
-        
-    file_path = os.path.join(SCRIPTS_DIR, name)
+    file_path = _safe_script_path(name)
     with open(file_path, "w", encoding="utf-8") as f:
-        f.write(script_content)
-        
-    return JSONResponse({"status": "success", "file": name})
+        f.write(str(script_content or ""))
 
-class GenerateCaseReq(BaseModel):
-    name: str
-    start_url: str
-    instruction: str
+    return JSONResponse({"status": "success", "file": os.path.basename(file_path)})
 
-class ImportNaturalLanguagePreviewReq(BaseModel):
-    text: str
-    default_group: Optional[str] = None
-    default_start_url: Optional[str] = None
-
-class ImportNaturalLanguageConfirmReq(BaseModel):
-    cases: List[Dict[str, Any]]
-
-_SUPPORTED_STEP_TYPES = {"click", "input", "wait", "assert", "hover", "select_option", "set_checked", "double_click", "right_click", "press_key", "scroll"}
-
-def _prompt_file_path(filename: str) -> str:
-    safe_name = os.path.basename((filename or "").strip())
-    if not safe_name.endswith(".txt") or safe_name != (filename or "").strip():
-        raise ValueError("Invalid prompt filename")
-    prompts_root = os.path.realpath(PROMPTS_DIR)
-    p = os.path.realpath(os.path.join(prompts_root, safe_name))
-    if not p.startswith(prompts_root + os.sep):
-        raise ValueError("Invalid prompt filename")
-    return p
-
-def _load_prompt_preset(filename: str, fallback: str = "") -> str:
-    try:
-        p = _prompt_file_path(filename)
-        if os.path.exists(p):
-            with open(p, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-            if content:
-                return content
-    except Exception:
-        pass
-    return fallback
-
-def _strip_json_markdown(content: str) -> str:
-    content = (content or "").strip()
-    if content.startswith("```json"):
-        return content[7:-3].strip()
-    if content.startswith("```"):
-        return content[3:-3].strip()
-    return content
-
-def _normalize_import_step(raw: Any) -> Dict[str, Any]:
-    if not isinstance(raw, dict):
-        return {"type": "click", "selector": "", "intent": str(raw or "").strip(), "value": ""}
-    step_type = str(raw.get("type") or "click").strip()
-    if step_type not in _SUPPORTED_STEP_TYPES:
-        step_type = "click"
-    step = {
-        "type": step_type,
-        "selector": str(raw.get("selector") or ""),
-        "intent": str(raw.get("intent") or raw.get("description") or "").strip(),
-        "value": "" if raw.get("value") is None else str(raw.get("value")),
-    }
-    if raw.get("url") is not None:
-        step["url"] = str(raw.get("url") or "")
-    if step_type == "assert":
-        assert_type = str(raw.get("assert_type") or "text").strip()
-        step["assert_type"] = assert_type if assert_type in {"text", "url", "visible"} else "text"
-    return step
-
-def _is_open_page_step(step: Dict[str, Any]) -> bool:
-    if not isinstance(step, dict):
-        return False
-    text = f"{step.get('intent') or ''} {step.get('value') or ''}".strip().lower()
-    if not text:
-        return False
-    patterns = [
-        r"打开.+页",
-        r"打开.+url",
-        r"访问.+页",
-        r"访问.+url",
-        r"进入.+页",
-        r"进入.+url",
-        r"打开登录页",
-        r"访问登录页",
-        r"进入登录页",
-    ]
-    return any(re.search(p, text) for p in patterns)
-
-def _normalize_import_case(raw: Any, idx: int, default_group: str = "", default_start_url: str = "") -> Dict[str, Any]:
-    raw = raw if isinstance(raw, dict) else {}
-    name = str(raw.get("name") or raw.get("title") or f"导入用例 {idx + 1}").strip()
-    group_name = str(raw.get("group_name") or raw.get("module") or default_group or "导入用例").strip()
-    start_url = str(raw.get("start_url") or default_start_url or "").strip()
-    steps = [s for s in (_normalize_import_step(s) for s in (raw.get("steps") or [])) if not _is_open_page_step(s)]
-    variables = raw.get("variables") if isinstance(raw.get("variables"), dict) else {}
-    dataset = raw.get("dataset") if isinstance(raw.get("dataset"), list) else []
-    tags = raw.get("tags") if isinstance(raw.get("tags"), list) else []
-    tags = [str(t).strip() for t in tags if str(t or "").strip()]
-    for tag in ("imported", "nl_import"):
-        if tag not in tags:
-            tags.append(tag)
-    return {
-        "name": name,
-        "group_name": group_name,
-        "type": "json",
-        "start_url": start_url,
-        "steps": steps,
-        "tags": tags,
-        "variables": variables,
-        "dataset": dataset,
-    }
-
-def _validate_import_case(case_doc: Dict[str, Any]) -> List[str]:
-    errors: List[str] = []
-    if not str(case_doc.get("name") or "").strip():
-        errors.append("用例名称不能为空")
-    if not isinstance(case_doc.get("steps"), list) or len(case_doc.get("steps") or []) == 0:
-        errors.append("至少需要 1 个步骤")
-    for i, step in enumerate(case_doc.get("steps") or []):
-        if step.get("type") not in _SUPPORTED_STEP_TYPES:
-            errors.append(f"第 {i + 1} 步类型不支持")
-        if not str(step.get("intent") or "").strip() and step.get("type") not in {"wait", "assert"}:
-            errors.append(f"第 {i + 1} 步缺少操作意图")
-    try:
-        _validate_case_placeholders_or_raise(case_doc)
-    except HTTPException as e:
-        detail = e.detail if isinstance(e.detail, dict) else {"error": str(e.detail)}
-        errors.append(str(detail.get("error") or detail))
-    return errors
-
-def _parse_nl_import_response(content: str, default_group: str, default_start_url: str) -> List[Dict[str, Any]]:
-    data = json.loads(_strip_json_markdown(content))
-    raw_cases = data.get("cases") if isinstance(data, dict) else data
-    if isinstance(raw_cases, dict):
-        raw_cases = [raw_cases]
-    if not isinstance(raw_cases, list):
-        raw_cases = []
-    return [_normalize_import_case(raw, i, default_group, default_start_url) for i, raw in enumerate(raw_cases)]
-
-def _create_import_case(case_doc: Dict[str, Any]) -> str:
-    now = int(time.time())
-    case_id = _stable_case_id(case_doc.get("name") or "imported")
-    db = SessionLocal()
-    try:
-        c = CaseModel(
-            id=case_id,
-            name=case_doc.get("name") or "导入用例",
-            group_name=case_doc.get("group_name") or "导入用例",
-            type="json",
-            start_url=case_doc.get("start_url") or "",
-            steps=json.dumps(case_doc.get("steps") or []),
-            tags=json.dumps(case_doc.get("tags") or []),
-            variables=json.dumps(case_doc.get("variables") or {}),
-            dataset=json.dumps(case_doc.get("dataset") or []),
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(c)
-        db.commit()
-        return case_id
-    finally:
-        db.close()
-
-@app.post("/api/cases/generate")
-async def generate_case(req: GenerateCaseReq):
-    _load_env()
-    api_key = os.environ.get("OPENAI_API_KEY")
-    api_base = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-    model_name = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o")
-    
-    if not api_key:
-        return JSONResponse({"error": "请先在设置中配置 OpenAI API Key"}, status_code=400)
-        
-    try:
-        llm = ChatOpenAI(
-            model=model_name,
-            api_key=api_key,
-            base_url=api_base,
-            temperature=0.1,
-            model_kwargs={"response_format": {"type": "json_object"}}
-        )
-        
-        system_prompt = _load_prompt_preset("nl2case_system_prompt.txt", "你是一个自动化的测试用例生成专家。请将用户的自然语言测试指令转换为结构化 JSON。")
-        user_prompt = f"初始URL: {req.start_url}\n自然语言指令:\n{req.instruction}"
-        
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
-        
-        response = llm.invoke(messages)
-        content = response.content
-        token_usage = None
-        try:
-            if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
-                token_usage = response.response_metadata.get("token_usage")
-        except Exception:
-            token_usage = None
-        data = json.loads(content)
-        
-        # 构造用例结构
-        case_id = _stable_case_id(req.name or "natural")
-        
-        db = SessionLocal()
-        try:
-            new_case = CaseModel(
-                id=case_id,
-                name=req.name or "自然语言生成的用例",
-                group_name="",
-                type="json",
-                start_url=req.start_url,
-                steps=json.dumps(data.get("steps", [])),
-                tags=json.dumps(["auto_generated"]),
-                variables=json.dumps({}),
-                dataset=json.dumps([]),
-                created_at=int(time.time()),
-                updated_at=int(time.time())
-            )
-            db.add(new_case)
-            db.commit()
-        finally:
-            db.close()
-            
-        return {"status": "ok", "id": case_id, "token_usage": token_usage, "model": model_name}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.post("/api/cases/import_nl/preview")
-async def import_natural_language_preview(req: ImportNaturalLanguagePreviewReq):
-    text = (req.text or "").strip()
-    if not text:
-        return JSONResponse({"error": "请输入自然语言用例内容"}, status_code=400)
-    if len(text) > 60000:
-        return JSONResponse({"error": "导入内容过长，请拆分后再导入"}, status_code=400)
-
-    _load_env()
-    api_key = os.environ.get("OPENAI_API_KEY")
-    api_base = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-    model_name = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o")
-    if not api_key:
-        return JSONResponse({"error": "请先在设置中配置 OpenAI API Key"}, status_code=400)
-
-    default_group = (req.default_group or "导入用例").strip()
-    default_start_url = (req.default_start_url or "").strip()
-    try:
-        llm = ChatOpenAI(
-            model=model_name,
-            api_key=api_key,
-            base_url=api_base,
-            temperature=0.1,
-            model_kwargs={"response_format": {"type": "json_object"}}
-        )
-        system_prompt = _load_prompt_preset("nl_import_system_prompt.txt", "你是资深测试工程师。请把用户粘贴的自然语言测试用例批量转换为结构化 JSON。")
-        user_prompt = f"默认分组: {default_group}\n默认起始URL: {default_start_url}\n自然语言用例内容:\n{text}"
-        resp = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
-        token_usage = None
-        try:
-            if hasattr(resp, "response_metadata") and isinstance(resp.response_metadata, dict):
-                token_usage = resp.response_metadata.get("token_usage")
-        except Exception:
-            token_usage = None
-        cases = _parse_nl_import_response(resp.content or "", default_group, default_start_url)
-        items = []
-        for i, case_doc in enumerate(cases):
-            errors = _validate_import_case(case_doc)
-            items.append({"index": i, "case": case_doc, "valid": len(errors) == 0, "errors": errors})
-        return JSONResponse({"status": "ok", "items": items, "token_usage": token_usage, "model": model_name})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.post("/api/cases/import_nl/confirm")
-async def import_natural_language_confirm(req: ImportNaturalLanguageConfirmReq):
-    if not isinstance(req.cases, list) or not req.cases:
-        return JSONResponse({"error": "请选择要导入的用例"}, status_code=400)
-    imported = []
-    failed = []
-    for i, raw in enumerate(req.cases):
-        case_doc = _normalize_import_case(raw, i, raw.get("group_name") if isinstance(raw, dict) else "", raw.get("start_url") if isinstance(raw, dict) else "")
-        errors = _validate_import_case(case_doc)
-        if errors:
-            failed.append({"index": i, "name": case_doc.get("name"), "errors": errors})
-            continue
-        try:
-            case_id = _create_import_case(case_doc)
-            imported.append({"index": i, "id": case_id, "name": case_doc.get("name")})
-        except Exception as e:
-            failed.append({"index": i, "name": case_doc.get("name"), "errors": [str(e)]})
-    return JSONResponse({"status": "success", "imported": imported, "failed": failed})
-
-@app.get("/api/cases")
-async def get_cases():
-    db = SessionLocal()
-    try:
-        db.query(CaseModel).filter(CaseModel.type == "recorded").update({"type": "json"})
-        db.query(CaseModel).filter(CaseModel.type == None).update({"type": "json"})
-        db.commit()
-    except Exception:
-        pass
-    finally:
-        db.close()
-    return JSONResponse(_list_cases())
-
-@app.get("/api/suites")
-async def get_suites():
-    return JSONResponse(_list_suites())
-
-@app.post("/api/suites")
-async def create_suite(request: Request):
-    data = await request.json()
-    name = str(data.get("name") or "").strip() or f"suite_{int(time.time())}"
-    suite_id = _stable_suite_id()
-        
-    env_id = data.get("env_id")
-    setup_case_id = str(data.get("setup_case_id") or "").strip() or None
-    raw_case_ids = data.get("case_ids") or []
-    case_ids = []
-    seen = set()
-    for cid in raw_case_ids:
-        cid = str(cid or "").strip()
-        if not cid or cid == setup_case_id or cid in seen:
-            continue
-        seen.add(cid)
-        case_ids.append(cid)
-        
-    db = SessionLocal()
-    try:
-        if db.query(SuiteModel).filter_by(id=suite_id).first():
-            return JSONResponse({"error": "Suite already exists"}, status_code=400)
-            
-        new_suite = SuiteModel(
-            id=suite_id,
-            name=name,
-            env_id=env_id,
-            setup_case_id=setup_case_id,
-            case_ids=json.dumps(case_ids),
-            created_at=int(time.time()),
-            updated_at=int(time.time())
-        )
-        db.add(new_suite)
-        db.commit()
-        return JSONResponse({"status": "success", "id": suite_id})
-    finally:
-        db.close()
-@app.get("/api/suites/{suite_id}")
-async def get_suite(suite_id: str):
-    db = SessionLocal()
-    try:
-        s = db.query(SuiteModel).filter_by(id=suite_id).first()
-        if not s:
-            return JSONResponse({"error": "Suite not found"}, status_code=404)
-        return JSONResponse({
-            "id": s.id,
-            "name": s.name,
-            "description": s.description,
-            "env_id": s.env_id,
-            "setup_case_id": s.setup_case_id,
-            "case_ids": json.loads(s.case_ids) if s.case_ids else [],
-            "created_at": s.created_at,
-            "updated_at": s.updated_at
-        })
-    finally:
-        db.close()
-@app.put("/api/suites/{suite_id}")
-async def update_suite(suite_id: str, request: Request):
-    data = await request.json()
-    db = SessionLocal()
-    try:
-        s = db.query(SuiteModel).filter_by(id=suite_id).first()
-        if not s:
-            return JSONResponse({"error": "Suite not found"}, status_code=404)
-            
-        if "name" in data: s.name = data.get("name")
-        if "description" in data: s.description = data.get("description")
-        if "env_id" in data: s.env_id = data.get("env_id")
-        if "setup_case_id" in data: s.setup_case_id = data.get("setup_case_id")
-        
-        raw_case_ids = data.get("case_ids") or []
-        case_ids = []
-        seen = set()
-        for cid in raw_case_ids:
-            cid = str(cid or "").strip()
-            if not cid or cid == s.setup_case_id or cid in seen:
-                continue
-            seen.add(cid)
-            case_ids.append(cid)
-            
-        if "case_ids" in data: s.case_ids = json.dumps(case_ids)
-        s.updated_at = int(time.time())
-        db.commit()
-        return JSONResponse({"status": "success", "message": "Suite updated"})
-    finally:
-        db.close()
-@app.delete("/api/suites/{suite_id}")
-async def delete_suite(suite_id: str):
-    db = SessionLocal()
-    try:
-        s = db.query(SuiteModel).filter_by(id=suite_id).first()
-        if not s:
-            return JSONResponse({"error": "Suite not found"}, status_code=404)
-        db.delete(s)
-        db.commit()
-    finally:
-        db.close()
-    
-    runs = _list_suite_runs(suite_id=suite_id)
-    import shutil
-    async with active_runs_lock:
-        for r in runs:
-            safe_id = (r["id"] or "").strip().replace("/", "_").replace("\\", "_").replace("..", "_")
-            d = _suite_run_dir(safe_id)
-            shutil.rmtree(d, ignore_errors=True)
-            if safe_id in active_runs:
-                del active_runs[safe_id]
-                
-    return JSONResponse({"status": "success"})
+app.include_router(create_suites_router(SuiteRouteDeps(
+    session_factory=SessionLocal,
+    suite_model=SuiteModel,
+    stable_suite_id=_stable_suite_id,
+    list_suites=_list_suites,
+    list_suite_runs=lambda suite_id: _list_suite_runs(suite_id=suite_id),
+    normalize_suite_case_ids=_normalize_suite_case_ids,
+    validate_suite_case_refs=_validate_suite_case_refs,
+    suite_run_dir=_suite_run_dir,
+)))
 
 _PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
 _BUILTIN_PLACEHOLDERS = {"today_ymd", "today_yyyyMMdd", "today_mmdd"}
@@ -1499,7 +1116,7 @@ def _normalize_recorded_steps(steps: Any) -> Dict[str, Any]:
 
     return {
         "steps": cleaned,
-        "summary": {
+    "summary": {
             "original_count": len(steps),
             "normalized_count": len(cleaned),
             "removed_count": removed_count,
@@ -1507,409 +1124,40 @@ def _normalize_recorded_steps(steps: Any) -> Dict[str, Any]:
         }
     }
 
-def _create_case_from_payload(data: Dict[str, Any], normalize_recorded: bool = False) -> JSONResponse:
-    name = _safe_case_name(data.get("name") or f"case_{int(time.time())}")
+app.include_router(create_case_generation_router(CaseGenerationRouteDeps(
+    session_factory=SessionLocal,
+    case_model=CaseModel,
+    prompts_dir=lambda: PROMPTS_DIR,
+    load_env=_load_env,
+    stable_case_id=_stable_case_id,
+    validate_case_placeholders=_validate_case_placeholders_or_raise,
+)))
 
-    tags = data.get("tags", [])
-    steps = data.get("steps", [])
-    recorder_normalize_summary = None
-    if normalize_recorded:
-        normalized = _normalize_recorded_steps(steps)
-        steps = normalized["steps"]
-        recorder_normalize_summary = normalized["summary"]
-        tag_set = set(tags if isinstance(tags, list) else [])
-        tag_set.add("auto_generated")
-        tag_set.add("normalized")
-        tags = sorted(tag_set)
+app.include_router(create_cases_router(CasesRouteDeps(
+    session_factory=SessionLocal,
+    case_model=CaseModel,
+    list_cases=_list_cases,
+    stable_case_id=_stable_case_id,
+    safe_case_name=_safe_case_name,
+    case_doc_from_model=_case_doc_from_model,
+    write_case_backup_file=_write_case_backup_file,
+    case_path=_case_path,
+    remove_case_from_suites=_remove_case_from_suites,
+    validate_case_placeholders=_validate_case_placeholders_or_raise,
+    build_python_script=_build_python_script,
+    normalize_recorded_steps=_normalize_recorded_steps,
+)))
 
-    _validate_case_placeholders_or_raise({
-        "start_url": data.get("start_url"),
-        "steps": steps,
-        "variables": data.get("variables", {}),
-        "dataset": data.get("dataset", []),
-    })
-
-    db = SessionLocal()
-    try:
-        final_case_id = _stable_case_id(name)
-        final_name = name
-        while db.query(CaseModel).filter_by(id=final_case_id).first():
-            final_case_id = _stable_case_id(name)
-
-        new_case = CaseModel(
-            id=final_case_id,
-            name=final_name,
-            group_name=str(data.get("group_name") or "").strip(),
-            type="json",
-            start_url=data.get("start_url"),
-            steps=json.dumps(steps),
-            tags=json.dumps(tags),
-            variables=json.dumps(data.get("variables", {})),
-            dataset=json.dumps(data.get("dataset", [])),
-            created_at=int(time.time()),
-            updated_at=int(time.time())
-        )
-        db.add(new_case)
-        db.commit()
-        response = {"status": "success", "id": final_case_id}
-        if recorder_normalize_summary is not None:
-            response["normalized"] = recorder_normalize_summary
-        return JSONResponse(response)
-    finally:
-        db.close()
-
-@app.post("/api/recorder/cases")
-async def create_case_from_recorder(request: Request):
-    data = await request.json()
-    return _create_case_from_payload(data, normalize_recorded=True)
-
-@app.post("/api/cases")
-async def create_case(request: Request):
-    data = await request.json()
-    return _create_case_from_payload(data)
-@app.get("/api/cases/{case_id}")
-async def get_case(case_id: str):
-    db = SessionLocal()
-    try:
-        c = db.query(CaseModel).filter_by(id=case_id).first()
-        if not c:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
-        return JSONResponse({
-            "id": c.id,
-            "name": c.name,
-            "type": c.type,
-            "start_url": getattr(c, "start_url", None),
-            "steps": json.loads(c.steps) if c.steps else [],
-            "tags": json.loads(c.tags) if c.tags else [],
-            "variables": json.loads(c.variables) if getattr(c, "variables", None) else {},
-            "dataset": json.loads(c.dataset) if getattr(c, "dataset", None) else [],
-            "created_at": c.created_at,
-            "updated_at": c.updated_at
-        })
-    finally:
-        db.close()
-@app.put("/api/cases/{case_id}")
-async def update_case(case_id: str, request: Request):
-    data = await request.json()
-    db = SessionLocal()
-    try:
-        c = db.query(CaseModel).filter_by(id=case_id).first()
-        if not c:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
-
-        next_doc = _case_doc_from_model(c)
-        if "steps" in data:
-            next_doc["steps"] = data.get("steps", [])
-        if "variables" in data:
-            next_doc["variables"] = data.get("variables", {})
-        if "dataset" in data:
-            next_doc["dataset"] = data.get("dataset", [])
-        if "start_url" in data:
-            next_doc["start_url"] = data.get("start_url")
-        _validate_case_placeholders_or_raise(next_doc)
-        
-        _write_case_backup_file(case_id, _case_doc_from_model(c))
-        if "steps" in data:
-            c.steps = json.dumps(data.get("steps", []))
-        if "tags" in data:
-            c.tags = json.dumps(data.get("tags", []))
-        if "variables" in data:
-            c.variables = json.dumps(data.get("variables", {}))
-        if "dataset" in data:
-            c.dataset = json.dumps(data.get("dataset", []))
-        if "name" in data:
-            c.name = data.get("name")
-        if "start_url" in data:
-            c.start_url = data.get("start_url")
-        if "group_name" in data:
-            c.group_name = str(data.get("group_name") or "").strip()
-        c.updated_at = int(time.time())
-        db.commit()
-        return JSONResponse({"status": "success", "message": "Case updated"})
-    finally:
-        db.close()
-@app.post("/api/cases/batch_group")
-async def batch_group_cases(request: Request):
-    data = await request.json()
-    case_ids = data.get("case_ids") or []
-    group_name = str(data.get("group_name") or "").strip()
-    if not isinstance(case_ids, list) or not case_ids:
-        return JSONResponse({"error": "请选择要移动的用例"}, status_code=400)
-    db = SessionLocal()
-    try:
-        now = int(time.time())
-        updated = 0
-        cases = db.query(CaseModel).filter(CaseModel.id.in_(case_ids)).all()
-        for c in cases:
-            _write_case_backup_file(c.id, _case_doc_from_model(c))
-            c.group_name = group_name
-            c.updated_at = now
-            updated += 1
-        db.commit()
-        return JSONResponse({"status": "success", "updated": updated, "group_name": group_name})
-    finally:
-        db.close()
-
-@app.post("/api/cases/{case_id}/rename")
-async def rename_case(case_id: str, request: Request):
-    data = await request.json()
-    raw_name = data.get("new_name") if data.get("new_name") is not None else data.get("name")
-    new_name = _safe_case_name(str(raw_name or ""))
-    if not new_name:
-        return JSONResponse({"error": "用例名称不能为空"}, status_code=400)
-    if new_name.endswith(".json"):
-        new_name = new_name[:-5]
-    db = SessionLocal()
-    try:
-        c = db.query(CaseModel).filter_by(id=case_id).first()
-        if not c:
-            return JSONResponse({"error": "用例不存在"}, status_code=404)
-        if db.query(CaseModel).filter(CaseModel.id != case_id, CaseModel.name == new_name).first():
-            return JSONResponse({"error": "同名用例已存在"}, status_code=409)
-        _write_case_backup_file(case_id, _case_doc_from_model(c))
-        c.name = new_name
-        c.updated_at = int(time.time())
-        db.commit()
-        return JSONResponse({"status": "success", "case": _case_doc_from_model(c)})
-    finally:
-        db.close()
-
-@app.post("/api/cases/{case_id}/restore")
-async def restore_case(case_id: str):
-    bak_path = _case_path(case_id) + ".bak"
-    if not os.path.exists(bak_path):
-        return JSONResponse({"error": "Backup not found"}, status_code=404)
-    try:
-        with open(bak_path, "r", encoding="utf-8") as f:
-            bak_doc = json.load(f)
-    except Exception:
-        return JSONResponse({"error": "Backup is invalid"}, status_code=400)
-
-    db = SessionLocal()
-    try:
-        c = db.query(CaseModel).filter_by(id=case_id).first()
-        if not c:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
-        current_doc = _case_doc_from_model(c)
-
-        if not isinstance(bak_doc, dict):
-            return JSONResponse({"error": "Backup is invalid"}, status_code=400)
-
-        steps_val = bak_doc.get("steps", [])
-        if isinstance(steps_val, str):
-            try:
-                steps_val = json.loads(steps_val)
-            except Exception:
-                steps_val = []
-        if not isinstance(steps_val, list):
-            steps_val = []
-
-        _write_case_backup_file(case_id, current_doc)
-        c.steps = json.dumps(steps_val)
-        if "start_url" in bak_doc:
-            c.start_url = bak_doc.get("start_url")
-        if "name" in bak_doc and bak_doc.get("name"):
-            c.name = bak_doc.get("name")
-        if "tags" in bak_doc:
-            tags_val = bak_doc.get("tags") or []
-            if isinstance(tags_val, str):
-                try:
-                    tags_val = json.loads(tags_val)
-                except Exception:
-                    tags_val = []
-            if isinstance(tags_val, list):
-                c.tags = json.dumps(tags_val)
-        if "dataset" in bak_doc:
-            ds_val = bak_doc.get("dataset") or []
-            if isinstance(ds_val, str):
-                try:
-                    ds_val = json.loads(ds_val)
-                except Exception:
-                    ds_val = []
-            if isinstance(ds_val, list):
-                c.dataset = json.dumps(ds_val)
-        if "type" in bak_doc and bak_doc.get("type"):
-            c.type = bak_doc.get("type")
-
-        c.updated_at = int(time.time())
-        db.commit()
-        return JSONResponse({"status": "success", "message": "已恢复到上一个用例版本（并已将当前版本写入备份）"})
-    finally:
-        db.close()
-@app.post("/api/cases/{case_id}/heal/approve")
-async def approve_heal(case_id: str, request: Request):
-    data = await request.json()
-    old_selector = (data.get("old_selector") or "").strip()
-    new_selector = (data.get("new_selector") or "").strip()
-    step_intent = (data.get("step_intent") or "").strip()
-    if not new_selector:
-        return JSONResponse({"error": "Missing parameters"}, status_code=400)
-        
-    db = SessionLocal()
-    try:
-        case_model = db.query(CaseModel).filter_by(id=case_id).first()
-        if not case_model:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
-            
-        _write_case_backup_file(case_id, _case_doc_from_model(case_model))
-        steps = json.loads(case_model.steps) if case_model.steps else []
-        already_updated = any((step.get("selector") or "") == new_selector for step in steps)
-        updated = False
-        
-        if old_selector:
-            for step in steps:
-                step_sel = step.get("selector")
-                if step_sel == old_selector or (step_sel or "").replace('"', "'") == old_selector:
-                    step["selector"] = new_selector
-                    updated = True
-        else:
-            if not step_intent:
-                return JSONResponse({"error": "Missing parameters"}, status_code=400)
-            candidates: List[int] = []
-            for i, step in enumerate(steps):
-                if (step.get("intent") or "").strip() == step_intent and not (step.get("selector") or "").strip():
-                    candidates.append(i)
-            if len(candidates) == 0:
-                return JSONResponse({"error": "No matching step found for intent (selector empty required)"}, status_code=404)
-            if len(candidates) > 1:
-                return JSONResponse({"error": "Multiple matching steps found for intent", "indices": candidates}, status_code=409)
-            steps[candidates[0]]["selector"] = new_selector
-            updated = True
-                
-        if updated:
-            case_model.steps = json.dumps(steps)
-            case_model.updated_at = int(time.time())
-            db.commit()
-            return JSONResponse({"status": "success", "message": "Selector updated"})
-        if already_updated:
-            return JSONResponse({"status": "success", "message": "Selector already updated"})
-        return JSONResponse({"error": f"Selector '{old_selector}' not found in current case steps"}, status_code=404)
-    finally:
-        db.close()
-
-@app.delete("/api/cases/{case_id}")
-async def delete_case(case_id: str):
-    db = SessionLocal()
-    try:
-        case_model = db.query(CaseModel).filter_by(id=case_id).first()
-        if not case_model:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
-        db.delete(case_model)
-        db.commit()
-        return JSONResponse({"status": "success"})
-    finally:
-        db.close()
-
-@app.get("/api/cases/{case_id}/script")
-async def get_case_script(case_id: str):
-    db = SessionLocal()
-    try:
-        case_model = db.query(CaseModel).filter_by(id=case_id).first()
-        if not case_model:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
-        case = {
-            "id": case_model.id,
-            "name": case_model.name,
-            "start_url": case_model.start_url,
-            "steps": json.loads(case_model.steps) if case_model.steps else [],
-            "variables": json.loads(case_model.variables) if getattr(case_model, "variables", None) else {},
-            "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
-            "type": case_model.type
-        }
-        return JSONResponse({"content": _build_python_script(case)})
-    finally:
-        db.close()
-
-@app.get("/api/runs")
-async def get_runs(case_id: Optional[str] = None, include_all: bool = False):
-    return JSONResponse(_list_runs(case_id=None if include_all else case_id))
-
-@app.get("/api/runs/{run_id}")
-async def get_run_detail(run_id: str):
-    meta_path = _run_meta_path(run_id)
-    if not os.path.exists(meta_path):
-        return JSONResponse({"error": "Run not found"}, status_code=404)
-    with open(meta_path, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-    meta = _migrate_run_meta(meta, meta_path)
-    return JSONResponse(meta)
-
-class RunFixSuggestReq(BaseModel):
-    force: bool = False
-
-@app.post("/api/runs/{run_id}/ai_fix_suggest")
-async def ai_fix_suggest(run_id: str, req: RunFixSuggestReq):
-    meta_path = _run_meta_path(run_id)
-    if not os.path.exists(meta_path):
-        return JSONResponse({"error": "Run not found"}, status_code=404)
-    with open(meta_path, "r", encoding="utf-8") as f:
-        run_meta = json.load(f)
-    run_meta = _migrate_run_meta(run_meta, meta_path)
-    case_id = run_meta.get("case_id")
-    if not case_id:
-        return JSONResponse({"error": "Missing case_id"}, status_code=400)
-    
-    db = SessionLocal()
-    try:
-        case_model = db.query(CaseModel).filter_by(id=case_id).first()
-        if not case_model:
-            return JSONResponse({"error": "Case not found"}, status_code=404)
-        case_doc = {
-            "id": case_model.id,
-            "name": case_model.name,
-            "start_url": case_model.start_url,
-            "steps": json.loads(case_model.steps) if case_model.steps else [],
-            "variables": json.loads(case_model.variables) if getattr(case_model, "variables", None) else {},
-            "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
-            "type": case_model.type
-        }
-    finally:
-        db.close()
-        
-    suggestion = _make_ai_fix_suggestion(run_meta, case_doc, force=bool(req.force))
-    run_meta["ai_fix_suggestion"] = suggestion
-    try:
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(run_meta, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-    return JSONResponse({"status": "ok", "suggestion": suggestion})
-
-def _deleted_runs_dir() -> str:
-    d = os.path.join(RUNS_DIR, "_deleted")
-    os.makedirs(d, exist_ok=True)
-    return d
-
-def _trash_run_dir(run_id: str) -> bool:
-    d = _run_dir(run_id)
-    if not os.path.exists(d):
-        return False
-    target = os.path.join(_deleted_runs_dir(), f"{os.path.basename(d)}_{int(time.time())}")
-    shutil.move(d, target)
-    return True
-
-@app.delete("/api/runs/{run_id}")
-async def delete_run(run_id: str):
-    if not _trash_run_dir(run_id):
-        return JSONResponse({"error": "Run not found"}, status_code=404)
-    return JSONResponse({"status": "success"})
-
-class BatchDeleteRunsReq(BaseModel):
-    run_ids: List[str]
-
-@app.post("/api/runs/batch_delete")
-async def batch_delete_runs(req: BatchDeleteRunsReq):
-    run_ids = [str(x).strip() for x in (req.run_ids or []) if str(x or "").strip()]
-    if not run_ids:
-        return JSONResponse({"error": "Missing run_ids"}, status_code=400)
-    deleted: List[str] = []
-    not_found: List[str] = []
-    for run_id in run_ids:
-        if not _trash_run_dir(run_id):
-            not_found.append(run_id)
-            continue
-        deleted.append(run_id)
-    return JSONResponse({"status": "success", "deleted": deleted, "not_found": not_found})
+app.include_router(create_runs_router(RunsRouteDeps(
+    session_factory=SessionLocal,
+    case_model=CaseModel,
+    list_runs=_list_runs,
+    run_meta_path=_run_meta_path,
+    migrate_run_meta=_migrate_run_meta,
+    make_ai_fix_suggestion=_make_ai_fix_suggestion,
+    run_dir=_run_dir,
+    runs_dir=lambda: RUNS_DIR,
+)))
 
 @app.get("/api/suite_runs")
 async def get_suite_runs(suite_id: Optional[str] = None):
@@ -1942,21 +1190,24 @@ async def run_suite(suite_id: str, env_id: Optional[str] = None):
         if not suite_model:
             return JSONResponse({"error": "Suite not found"}, status_code=404)
         suite = _suite_doc_from_model(suite_model)
+        setup_case_id = str(suite.get("setup_case_id") or "").strip() or None
+        raw_case_ids = suite.get("case_ids") or []
+        case_ids = _normalize_suite_case_ids(raw_case_ids, setup_case_id)
+        missing = _validate_suite_case_refs(db, case_ids, setup_case_id)
+        if missing:
+            return JSONResponse({"error": "Suite contains missing cases", "missing_case_ids": missing}, status_code=400)
     finally:
         db.close()
 
     suite_run_id = f"suite_run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     resolved_env_id = env_id if env_id is not None else suite.get("env_id")
-    setup_case_id = str(suite.get("setup_case_id") or "").strip() or None
-    raw_case_ids = suite.get("case_ids") or []
-    case_ids = [str(x).strip() for x in raw_case_ids if str(x or "").strip() and str(x).strip() != setup_case_id]
     display_case_ids = ([setup_case_id] if setup_case_id else []) + case_ids
     suite_meta = {
         "id": suite_run_id,
         "suite_id": suite.get("id") or suite_id,
         "suite_name": suite.get("name") or suite_id,
         "env_id": resolved_env_id,
-        "status": "running",
+        "status": RUN_STATUS_RUNNING,
         "started_at": int(time.time()),
         "ended_at": None,
         "duration_ms": None,
@@ -1975,143 +1226,18 @@ async def run_suite(suite_id: str, env_id: Optional[str] = None):
     asyncio.create_task(_run_suite_worker(suite_run_id, display_case_ids, resolved_env_id, storage_state_path=storage_state_path, setup_case_id=setup_case_id))
     return JSONResponse({"status": "starting", "suite_run_id": suite_run_id})
 
+def _suite_runner_deps() -> SuiteRunnerDeps:
+    return SuiteRunnerDeps(
+        run_meta_path=_run_meta_path,
+        suite_run_meta_path=_suite_run_meta_path,
+        start_run=_start_run,
+    )
+
 async def _wait_run_finished(run_id: str) -> Dict[str, Any]:
-    meta_path = _run_meta_path(run_id)
-    for _ in range(7200):
-        try:
-            if os.path.exists(meta_path):
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                if meta.get("status") in ("completed", "failed"):
-                    return meta
-        except Exception:
-            pass
-        await asyncio.sleep(0.25)
-    try:
-        if os.path.exists(meta_path):
-            with open(meta_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {"id": run_id, "status": "failed", "duration_ms": None, "heal_events": []}
+    return await wait_run_finished(_suite_runner_deps(), run_id)
 
 async def _run_suite_worker(suite_run_id: str, case_ids: List[str], env_id: Optional[str], storage_state_path: str, setup_case_id: Optional[str]) -> None:
-    meta_path = _suite_run_meta_path(suite_run_id)
-    started_ts = time.time()
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            suite_meta = json.load(f)
-    except Exception:
-        return
-
-    passed = 0
-    failed = 0
-    heal_total = 0
-    token_prompt_total = 0
-    token_completion_total = 0
-    token_total = 0
-    items: List[Dict[str, Any]] = []
-
-    extra_env = {"AI_TESTER_STORAGE_STATE_PATH": storage_state_path} if storage_state_path else None
-
-    for idx, case_id in enumerate(case_ids):
-        suite_meta["current_index"] = idx
-        suite_meta["current_case_id"] = case_id
-        try:
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(suite_meta, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-        try:
-            run_info = await _start_run(name=case_id, env_id=env_id, wait_for_ws=False, extra_env=extra_env)
-            run_id = run_info["run_id"]
-            item = {"case_id": case_id, "run_id": run_id, "status": "running", "duration_ms": None, "heal_count": None}
-            items.append(item)
-            suite_meta["items"] = items
-            try:
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump(suite_meta, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
-            run_meta = await _wait_run_finished(run_id)
-        except Exception:
-            run_id = f"run_failed_{uuid.uuid4().hex[:8]}"
-            run_meta = {"id": run_id, "status": "failed", "duration_ms": None, "heal_events": []}
-            items.append({"case_id": case_id, "run_id": run_id, "status": "failed", "duration_ms": None, "heal_count": 0})
-
-        status = run_meta.get("status") or "failed"
-        duration_ms = run_meta.get("duration_ms")
-        heal_count = len(run_meta.get("heal_events") or [])
-        token_usage = run_meta.get("token_usage") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        token_prompt_total += int(token_usage.get("prompt_tokens", 0) or 0)
-        token_completion_total += int(token_usage.get("completion_tokens", 0) or 0)
-        token_total += int(token_usage.get("total_tokens", 0) or 0)
-        heal_total += heal_count
-        if status == "completed":
-            passed += 1
-        else:
-            failed += 1
-
-        try:
-            last_item = items[-1]
-            if last_item.get("case_id") == case_id and last_item.get("run_id") == run_id:
-                last_item["status"] = status
-                last_item["duration_ms"] = duration_ms
-                last_item["heal_count"] = heal_count
-                last_item["token_usage"] = token_usage
-        except Exception:
-            pass
-
-        suite_meta["items"] = items
-        suite_meta["summary"] = {
-            "total": len(case_ids),
-            "passed": passed,
-            "failed": failed,
-            "heal_total": heal_total,
-            "token_prompt": token_prompt_total,
-            "token_completion": token_completion_total,
-            "token_total": token_total,
-        }
-        try:
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(suite_meta, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-        if setup_case_id and case_id == setup_case_id and status != "completed":
-            suite_meta["status"] = "failed"
-            suite_meta["ended_at"] = int(time.time())
-            suite_meta["duration_ms"] = int((time.time() - started_ts) * 1000)
-            suite_meta["current_index"] = None
-            suite_meta["current_case_id"] = None
-            try:
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump(suite_meta, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
-            return
-
-    suite_meta["status"] = "failed" if failed > 0 else "completed"
-    suite_meta["ended_at"] = int(time.time())
-    suite_meta["duration_ms"] = int((time.time() - started_ts) * 1000)
-    suite_meta["current_index"] = None
-    suite_meta["current_case_id"] = None
-    suite_meta["items"] = items
-    suite_meta["summary"] = {
-        "total": len(case_ids),
-        "passed": passed,
-        "failed": failed,
-        "heal_total": heal_total,
-        "token_prompt": token_prompt_total,
-        "token_completion": token_completion_total,
-        "token_total": token_total,
-    }
-    try:
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(suite_meta, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    await run_suite_worker(_suite_runner_deps(), suite_run_id, case_ids, env_id, storage_state_path, setup_case_id)
 
 @app.get("/api/runs/{run_id}/screenshots/{filename}")
 async def get_run_screenshot(run_id: str, filename: str):
@@ -2179,232 +1305,32 @@ async def run_script(name: str, env_id: Optional[str] = None):
     result = await _start_run(name=name, env_id=env_id, wait_for_ws=True)
     return JSONResponse({"status": "starting", "session_id": result["session_id"], "run_id": result["run_id"]})
 
+def _runner_deps() -> RunnerDeps:
+    return RunnerDeps(
+        project_root=PROJECT_ROOT,
+        scripts_dir=SCRIPTS_DIR,
+        envs_file=ENVS_FILE,
+        internal_token=INTERNAL_TOKEN,
+        session_factory=SessionLocal,
+        case_model=CaseModel,
+        build_python_script=_build_python_script,
+        validate_case_placeholders=_validate_case_placeholders_or_raise,
+        safe_script_path=_safe_script_path,
+        run_dir=_run_dir,
+        run_meta_path=_run_meta_path,
+        load_env=_load_env,
+        infer_failure_reason=_infer_failure_reason,
+    )
+
 async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    db = SessionLocal()
-    case = None
-    try:
-        case_model = db.query(CaseModel).filter_by(id=name).first()
-        if case_model:
-            case = {
-                "id": case_model.id,
-                "name": case_model.name,
-                "start_url": case_model.start_url,
-                "steps": json.loads(case_model.steps) if case_model.steps else [],
-                "variables": json.loads(case_model.variables) if getattr(case_model, "variables", None) else {},
-                "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
-                "type": case_model.type
-            }
-    finally:
-        db.close()
-
-    file_path: Optional[str] = None
-    if not case:
-        file_path = _safe_script_path(name)
-    resolved_script_path: Optional[str] = None
-    temp_file: Optional[tempfile.NamedTemporaryFile] = None
-    case_id: Optional[str] = None
-
-    base_url_override = None
-    if env_id and os.path.exists(ENVS_FILE):
-        with open(ENVS_FILE, "r", encoding="utf-8") as f:
-            envs = json.load(f)
-            for e in envs:
-                if e.get("id") == env_id:
-                    base_url_override = e.get("base_url")
-                    break
-
-    if case:
-        case_id = case["id"]
-        if base_url_override and case.get("start_url"):
-            su = case["start_url"]
-            if su.startswith("/"):
-                case["start_url"] = base_url_override.rstrip("/") + su
-            else:
-                # If it's absolute but we want to override domain, simple replace:
-                # for MVP, just replace if they chose an environment
-                from urllib.parse import urlparse
-                parsed_base = urlparse(base_url_override)
-                parsed_su = urlparse(su)
-                if parsed_base.scheme and parsed_base.netloc:
-                    case["start_url"] = parsed_su._replace(scheme=parsed_base.scheme, netloc=parsed_base.netloc).geturl()
-                    
-        _validate_case_placeholders_or_raise(case)
-        script_content = _build_python_script(case)
-        os.makedirs(SCRIPTS_DIR, exist_ok=True)
-        temp_file = tempfile.NamedTemporaryFile(dir=SCRIPTS_DIR, mode="w", suffix=".py", prefix="test_case_", delete=False, encoding="utf-8")
-        temp_file.write(script_content)
-        temp_file.flush()
-        resolved_script_path = temp_file.name
-    elif file_path and os.path.exists(file_path):
-        resolved_script_path = file_path
-    else:
-        raise FileNotFoundError("File not found")
-
-    run_id = f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-    session_id = run_id
-
-    run_folder = _run_dir(run_id)
-    os.makedirs(os.path.join(run_folder, "screenshots"), exist_ok=True)
-    meta = {
-        "schema_version": 2,
-        "id": run_id,
-        "case_id": case_id or name,
-        "status": "running",
-        "started_at": int(time.time()),
-        "ended_at": None,
-        "duration_ms": None,
-        "failure_reason": None,
-        "logs": [],
-        "screenshots": [],
-        "heal_events": [],
-        "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
-    active_runs[run_id] = meta
-    with open(_run_meta_path(run_id), "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    
-    # 异步启动 pytest 进程
-    asyncio.create_task(run_pytest_worker(session_id, resolved_script_path, temp_file.name if temp_file else None, wait_for_ws=wait_for_ws, extra_env=extra_env))
-    return {"run_id": run_id, "session_id": session_id}
+    return await start_run(_runner_deps(), name=name, env_id=env_id, wait_for_ws=wait_for_ws, extra_env=extra_env)
 
 async def run_pytest_worker(session_id: str, script_path: str, cleanup_path: Optional[str] = None, wait_for_ws: bool = True, extra_env: Optional[Dict[str, str]] = None):
-    if wait_for_ws:
-        for _ in range(50):
-            if session_id in active_sessions:
-                break
-            await asyncio.sleep(0.1)
-    ws = active_sessions.get(session_id)
-    if ws:
-        await ws.send_json({"type": "log", "message": "⏳ 等待队列资源中..."})
-        
-    async with worker_semaphore:
-        _load_env()
-        env = os.environ.copy()
-        env["PLAYWRIGHT_HEADLESS"] = "1"
-        env["AI_TESTER_WS_SESSION"] = session_id
-        env["AI_TESTER_WS_PORT"] = "8000"
-        env["AI_TESTER_INTERNAL_TOKEN"] = INTERNAL_TOKEN
-        env["AI_TESTER_RUN_HISTORY_DIR"] = _run_dir(session_id)
-        env["PYTHONPATH"] = os.pathsep.join(
-            [os.path.join(PROJECT_ROOT, "src"), env.get("PYTHONPATH", "")]
-        ).strip(os.pathsep)
-        if os.environ.get("OPENAI_API_KEY") and not env.get("OPENAI_API_KEY"):
-            env["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
-        if extra_env:
-            for k, v in extra_env.items():
-                if v is None:
-                    continue
-                env[str(k)] = str(v)
-        
-        if ws:
-            await ws.send_json({"type": "log", "message": f"🚀 开始执行用例: {os.path.basename(script_path)}"})
-            if not env.get("OPENAI_API_KEY"):
-                await ws.send_json({"type": "log", "message": "⚠️ 未检测到 OPENAI_API_KEY，本次运行将禁用 AI 自愈，仅按录制的 selector 执行。"})
-        run_meta = active_runs.get(session_id)
-        
-        try:
-            venv_python = os.path.join(PROJECT_ROOT, "venv", "bin", "python3")
-            python_exec = venv_python if os.path.exists(venv_python) else sys.executable
-            venv_bin = os.path.dirname(venv_python)
-            if os.path.exists(venv_bin):
-                env["PATH"] = os.pathsep.join([venv_bin, env.get("PATH", "")]).strip(os.pathsep)
-            process = await asyncio.create_subprocess_exec(
-                python_exec, "-m", "pytest", "-q", "-s", "--tb=short", "--disable-warnings", "-p", "ai_tester.pytest_fixtures", script_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                env=env,
-                cwd=PROJECT_ROOT
-            )
-            
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                
-                decoded_line = line.decode('utf-8').rstrip()
-                if not decoded_line:
-                    continue
-                    
-                if decoded_line.startswith("=========================") or decoded_line.startswith("-------------------------"):
-                    continue
-                if decoded_line.startswith("collected ") or "passed in " in decoded_line or "warnings summary" in decoded_line or "test_case_" in decoded_line:
-                    continue
-                if "short test summary info" in decoded_line or "FAILED tests/" in decoded_line or "PASSED tests/" in decoded_line:
-                    continue
-                    
-                current_ws = active_sessions.get(session_id)
-                if current_ws:
-                    try:
-                        await current_ws.send_json({"type": "log", "message": decoded_line})
-                    except Exception:
-                        pass
-                if run_meta is not None:
-                    run_meta["logs"].append(decoded_line)
-                    
-            await process.wait()
-            
-            current_ws = active_sessions.get(session_id)
-            if current_ws:
-                status = "completed" if process.returncode == 0 else "failed"
-                try:
-                    await current_ws.send_json({"type": "status", "status": status})
-                except Exception:
-                    pass
-            if run_meta is not None:
-                run_meta["status"] = "completed" if process.returncode == 0 else "failed"
-                run_meta["ended_at"] = int(time.time())
-                if run_meta.get("started_at"):
-                    run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
-                if process.returncode != 0:
-                    run_meta["failure_reason"] = _infer_failure_reason(run_meta.get("logs") or [])
-                try:
-                    token_path = os.path.join(_run_dir(session_id), "token_usage.json")
-                    if os.path.exists(token_path):
-                        with open(token_path, "r", encoding="utf-8") as f:
-                            token_summary = json.load(f)
-                        run_meta["token_usage"] = token_summary.get("totals") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                        run_meta["token_summary"] = token_summary
-                except Exception:
-                    pass
-                
-        except Exception as e:
-            current_ws = active_sessions.get(session_id)
-            if current_ws:
-                try:
-                    await current_ws.send_json({"type": "log", "message": f"❌ 执行异常: {str(e)}"})
-                    await current_ws.send_json({"type": "status", "status": "failed"})
-                except Exception:
-                    pass
-            if run_meta is not None:
-                run_meta["status"] = "failed"
-                run_meta["ended_at"] = int(time.time())
-                if run_meta.get("started_at"):
-                    run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
-                run_meta["logs"].append(f"❌ 执行异常: {str(e)}")
-                run_meta["failure_reason"] = {"category": "exception", "message": str(e)}
-                try:
-                    token_path = os.path.join(_run_dir(session_id), "token_usage.json")
-                    if os.path.exists(token_path):
-                        with open(token_path, "r", encoding="utf-8") as f:
-                            token_summary = json.load(f)
-                        run_meta["token_usage"] = token_summary.get("totals") or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                        run_meta["token_summary"] = token_summary
-                except Exception:
-                    pass
-        finally:
-            if run_meta is not None:
-                try:
-                    with open(_run_meta_path(session_id), "w", encoding="utf-8") as f:
-                        json.dump(run_meta, f, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
-                if session_id in active_runs:
-                    del active_runs[session_id]
-            if cleanup_path:
-                try:
-                    os.unlink(cleanup_path)
-                except Exception:
-                    pass
+    try:
+        from web_server.runner import run_pytest_worker as _run_pytest_worker_impl
+    except Exception:
+        from runner import run_pytest_worker as _run_pytest_worker_impl
+    await _run_pytest_worker_impl(_runner_deps(), session_id, script_path, cleanup_path, wait_for_ws=wait_for_ws, extra_env=extra_env)
 
 
 @app.websocket("/ws/run/{session_id}")
@@ -2475,176 +1401,14 @@ async def push_screenshot(session_id: str, request: Request):
             pass
     return {"status": "ok"}
 
-ENVS_FILE = os.path.join(PROJECT_ROOT, "tests", "environments.json")
-
-def _normalize_environments(data: Any) -> List[Dict[str, Any]]:
-    if not isinstance(data, list):
-        return []
-    normalized = []
-    seen = set()
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        base_url = str(item.get("base_url") or "").strip()
-        if not name and not base_url:
-            continue
-        env_id = str(item.get("id") or "").strip()
-        if not env_id or not env_id.startswith("env_"):
-            env_id = _stable_env_id()
-        while env_id in seen:
-            env_id = _stable_env_id()
-        seen.add(env_id)
-        normalized.append({"id": env_id, "name": name or env_id, "base_url": base_url})
-    return normalized
-
-@app.get("/api/environments")
-async def get_environments():
-    if not os.path.exists(ENVS_FILE):
-        return JSONResponse([])
-    with open(ENVS_FILE, "r", encoding="utf-8") as f:
-        envs = _normalize_environments(json.load(f))
-    with open(ENVS_FILE, "w", encoding="utf-8") as f:
-        json.dump(envs, f, ensure_ascii=False, indent=2)
-    return JSONResponse(envs)
-
-@app.post("/api/environments")
-async def save_environments(request: Request):
-    data = await request.json()
-    envs = _normalize_environments(data)
-    with open(ENVS_FILE, "w", encoding="utf-8") as f:
-        json.dump(envs, f, ensure_ascii=False, indent=2)
-    return JSONResponse({"status": "success", "environments": envs})
-
-PROMPTS_DIR = os.path.join(PROJECT_ROOT, "src", "ai_tester", "prompts")
-
-@app.get("/api/prompts")
-async def get_prompts():
-    os.makedirs(PROMPTS_DIR, exist_ok=True)
-    prompts = {}
-    for f in os.listdir(PROMPTS_DIR):
-        if f.endswith(".txt"):
-            try:
-                with open(os.path.join(PROMPTS_DIR, f), "r", encoding="utf-8") as file:
-                    prompts[f] = file.read()
-            except Exception:
-                pass
-    return JSONResponse(prompts)
-
-class PromptUpdateReq(BaseModel):
-    content: str
-
-@app.put("/api/prompts/{filename}")
-async def update_prompt(filename: str, req: PromptUpdateReq):
-    if not filename.endswith(".txt"):
-        return JSONResponse({"error": "Invalid filename"}, status_code=400)
-    os.makedirs(PROMPTS_DIR, exist_ok=True)
-    filepath = os.path.join(PROMPTS_DIR, filename)
-    try:
-        with open(filepath, "w", encoding="utf-8") as file:
-            file.write(req.content)
-        return JSONResponse({"status": "success"})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.get("/api/config")
-async def get_config():
-    p = os.path.join(PROJECT_ROOT, ".env")
-    cfg = {"OPENAI_API_BASE": "https://models.inference.ai.azure.com", "OPENAI_API_KEY": "", "OPENAI_MODEL_NAME": "gpt-4o-mini"}
-    if os.path.exists(p):
-        with open(p, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("OPENAI_API_BASE="):
-                    cfg["OPENAI_API_BASE"] = line[len("OPENAI_API_BASE="):]
-                elif line.startswith("OPENAI_API_KEY="):
-                    val = line[len("OPENAI_API_KEY="):]
-                    cfg["OPENAI_API_KEY"] = val
-                elif line.startswith("OPENAI_MODEL_NAME="):
-                    val = line[len("OPENAI_MODEL_NAME="):]
-                    cfg["OPENAI_MODEL_NAME"] = val
-    return JSONResponse(cfg)
-
-@app.post("/api/config")
-async def save_config(request: Request):
-    data = await request.json()
-    p = os.path.join(PROJECT_ROOT, ".env")
-    
-    cfg = {"OPENAI_API_BASE": "https://models.inference.ai.azure.com", "OPENAI_API_KEY": "", "OPENAI_MODEL_NAME": "gpt-4o-mini"}
-    if os.path.exists(p):
-        with open(p, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("OPENAI_API_BASE="):
-                    cfg["OPENAI_API_BASE"] = line[len("OPENAI_API_BASE="):]
-                elif line.startswith("OPENAI_API_KEY="):
-                    cfg["OPENAI_API_KEY"] = line[len("OPENAI_API_KEY="):]
-                elif line.startswith("OPENAI_MODEL_NAME="):
-                    cfg["OPENAI_MODEL_NAME"] = line[len("OPENAI_MODEL_NAME="):]
-                    
-    if "OPENAI_API_BASE" in data:
-        cfg["OPENAI_API_BASE"] = data["OPENAI_API_BASE"]
-    if "OPENAI_API_KEY" in data:
-        cfg["OPENAI_API_KEY"] = data["OPENAI_API_KEY"]
-    if "OPENAI_MODEL_NAME" in data:
-        cfg["OPENAI_MODEL_NAME"] = data["OPENAI_MODEL_NAME"]
-        
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(f"OPENAI_API_BASE={cfg['OPENAI_API_BASE']}\n")
-        f.write(f"OPENAI_API_KEY={cfg['OPENAI_API_KEY']}\n")
-        f.write(f"OPENAI_MODEL_NAME={cfg['OPENAI_MODEL_NAME']}\n")
-
-    _load_env()
-    return JSONResponse({"status": "success"})
-
-@app.post("/api/config/test")
-async def test_config(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-        
-    api_base = data.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-    api_key = data.get("OPENAI_API_KEY", "")
-    model_name = data.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
-    
-    api_base = str(api_base or "").strip()
-    api_key = str(api_key or "").strip()
-    model_name = str(model_name or "gpt-4o-mini").strip()
-
-    if not api_base:
-        return JSONResponse({"error": "请提供 Base URL"}, status_code=400)
-    if not api_key:
-        return JSONResponse({"error": "请提供 API Key"}, status_code=400)
-        
-    try:
-        t0 = time.time()
-        llm = ChatOpenAI(
-            model=model_name,
-            api_key=api_key,
-            base_url=api_base,
-            max_retries=1,
-            timeout=10 # 设置超时防止卡住
-        )
-        
-        # 兼容旧版本 Python (3.8) 没有 asyncio.to_thread 的问题
-        loop = asyncio.get_event_loop()
-        resp = await loop.run_in_executor(None, lambda: llm.invoke([HumanMessage(content="ping")]))
-        token_usage = None
-        try:
-            if hasattr(resp, "response_metadata") and isinstance(resp.response_metadata, dict):
-                token_usage = resp.response_metadata.get("token_usage")
-        except Exception:
-            token_usage = None
-        
-        latency_ms = int((time.time() - t0) * 1000)
-        reply = str(getattr(resp, "content", "")).strip()
-        msg = f"连接成功 · {model_name} · {latency_ms}ms"
-        if reply:
-            msg = msg + f" · {reply[:40]}"
-        return JSONResponse({"status": "success", "message": msg, "latency_ms": latency_ms, "token_usage": token_usage, "model": model_name})
-    except Exception as e:
-        return JSONResponse({"error": f"连接失败: {str(e)}"}, status_code=400)
+app.include_router(create_config_router(ConfigRouteDeps(
+    get_project_root=lambda: PROJECT_ROOT,
+    get_envs_file=lambda: ENVS_FILE,
+    get_prompts_dir=lambda: PROMPTS_DIR,
+    stable_env_id=_stable_env_id,
+    safe_prompt_path=_safe_prompt_path,
+    load_env=_load_env,
+)))
 
 
 # Serve frontend static files
