@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SOLO - 自然语言驱动的自动化测试工作台</title>
+  <meta name="description" content="SOLO 是自然语言驱动的自动化测试工作台。写下目标，SOLO 完成验证。">
+  <link rel="icon" type="image/png" href="frontend/public/favicon.png">
+  <style>
+    :root {
+      --bg: #f6f7f6;
+      --paper: #ffffff;
+      --ink: #111827;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --soft: #eef8f5;
+      --green: #10a37f;
+      --green-dark: #078766;
+      --slate: #1f2937;
+      --shadow: 0 22px 70px rgba(17, 24, 39, 0.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      letter-spacing: 0;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .page {
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(228, 231, 236, 0.82);
+      background: rgba(246, 247, 246, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .nav-inner,
+    .section-inner {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .nav-inner {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand img {
+      width: 46px;
+      height: 46px;
+      object-fit: contain;
+      flex: 0 0 auto;
+      display: block;
+    }
+
+    .brand-name {
+      display: flex;
+      flex-direction: column;
+      line-height: 1;
+    }
+
+    .brand-name strong {
+      font-size: 22px;
+      font-weight: 760;
+      letter-spacing: 0.12em;
+    }
+
+    .brand-name span {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      font-size: 14px;
+      color: #475467;
+      white-space: nowrap;
+    }
+
+    .nav-links a:hover {
+      color: var(--green-dark);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 42px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-size: 14px;
+      font-weight: 700;
+      transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      color: #fff;
+      background: var(--green);
+      box-shadow: 0 12px 28px rgba(16, 163, 127, 0.24);
+    }
+
+    .btn-primary:hover {
+      background: var(--green-dark);
+    }
+
+    .btn-secondary {
+      color: var(--slate);
+      background: #fff;
+      border-color: var(--line);
+    }
+
+    .hero {
+      padding: 82px 0 74px;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 247, 246, 0.94)),
+        radial-gradient(circle at 50% 0%, rgba(16, 163, 127, 0.12), transparent 44%);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.02fr) minmax(360px, 0.98fr);
+      gap: 56px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border: 1px solid rgba(16, 163, 127, 0.22);
+      border-radius: 999px;
+      color: var(--green-dark);
+      background: rgba(16, 163, 127, 0.08);
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    .hero h1 {
+      margin: 22px 0 0;
+      font-size: clamp(40px, 6vw, 70px);
+      line-height: 1.02;
+      font-weight: 820;
+      letter-spacing: 0;
+    }
+
+    .hero h1 span {
+      color: var(--green-dark);
+    }
+
+    .hero-copy {
+      margin: 24px 0 0;
+      max-width: 600px;
+      font-size: 18px;
+      line-height: 1.8;
+      color: #475467;
+    }
+
+    .hero-actions {
+      margin-top: 34px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .hero-note {
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .hero-note span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .hero-card {
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.90);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .browser-bar {
+      height: 48px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      background: #fbfcfc;
+    }
+
+    .traffic {
+      display: flex;
+      gap: 7px;
+    }
+
+    .traffic i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #d0d5dd;
+    }
+
+    .browser-title {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .workbench {
+      padding: 24px;
+    }
+
+    .lockup {
+      width: min(360px, 100%);
+      display: block;
+      margin-bottom: 24px;
+    }
+
+    .run-panel {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .run-head {
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .run-head strong {
+      font-size: 14px;
+    }
+
+    .status {
+      padding: 5px 10px;
+      border-radius: 999px;
+      color: var(--green-dark);
+      background: rgba(16, 163, 127, 0.08);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .steps {
+      display: grid;
+      gap: 10px;
+      padding: 16px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 32px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid #edf0f2;
+      border-radius: 16px;
+      background: #fbfcfc;
+    }
+
+    .step-icon {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      color: var(--green-dark);
+      background: var(--soft);
+      font-weight: 900;
+    }
+
+    .step strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .step span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .step code {
+      padding: 5px 8px;
+      border-radius: 999px;
+      color: #344054;
+      background: #fff;
+      border: 1px solid var(--line);
+      font-size: 11px;
+    }
+
+    section {
+      padding: 78px 0;
+    }
+
+    .section-title {
+      max-width: 720px;
+      margin-bottom: 34px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    .section-title p {
+      margin: 16px 0 0;
+      color: #596574;
+      font-size: 16px;
+      line-height: 1.75;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .feature {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 24px;
+      background: var(--paper);
+    }
+
+    .feature-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 15px;
+      display: grid;
+      place-items: center;
+      background: var(--soft);
+      color: var(--green-dark);
+      font-weight: 900;
+      margin-bottom: 18px;
+    }
+
+    .feature h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .feature p {
+      margin: 10px 0 0;
+      color: #596574;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    .flow {
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: var(--paper);
+      overflow: hidden;
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 28px;
+      padding: 24px;
+      border-bottom: 1px solid var(--line);
+      align-items: start;
+    }
+
+    .flow-row:last-child {
+      border-bottom: 0;
+    }
+
+    .flow-kicker {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 780;
+    }
+
+    .flow-index {
+      width: 34px;
+      height: 34px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: var(--green);
+      font-size: 13px;
+    }
+
+    .flow-row p {
+      margin: 0;
+      color: #596574;
+      line-height: 1.75;
+    }
+
+    .audience {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .audience-card {
+      min-height: 220px;
+      border-radius: 26px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    .audience-card.dark {
+      color: #fff;
+      background: #101828;
+      border-color: #101828;
+    }
+
+    .audience-card h3 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .audience-card p {
+      margin: 14px 0 0;
+      line-height: 1.75;
+      color: #596574;
+    }
+
+    .audience-card.dark p {
+      color: #cfd5df;
+    }
+
+    .cta {
+      padding: 82px 0 90px;
+    }
+
+    .cta-box {
+      border: 1px solid rgba(16, 163, 127, 0.20);
+      border-radius: 30px;
+      padding: 42px;
+      background: linear-gradient(135deg, #ffffff, #edf9f5);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 32px;
+      box-shadow: var(--shadow);
+    }
+
+    .cta h2 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 44px);
+    }
+
+    .cta p {
+      margin: 14px 0 0;
+      color: #596574;
+      line-height: 1.7;
+    }
+
+    .cta-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 28px 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer-inner {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .footer-inner a {
+      color: var(--green-dark);
+      font-weight: 700;
+    }
+
+    @media (max-width: 880px) {
+      .nav-links {
+        display: none;
+      }
+
+      .hero-grid,
+      .audience,
+      .cta-box {
+        grid-template-columns: 1fr;
+      }
+
+      .cta-actions {
+        justify-content: flex-start;
+      }
+
+      .hero {
+        padding-top: 48px;
+      }
+
+      .hero-card {
+        order: -1;
+      }
+
+      .features {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-row {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .nav-inner,
+      .section-inner,
+      .footer-inner {
+        width: min(100% - 28px, 1120px);
+      }
+
+      .brand-name span {
+        display: none;
+      }
+
+      .hero h1 {
+        font-size: 38px;
+      }
+
+      section {
+        padding: 56px 0;
+      }
+
+      .workbench {
+        padding: 16px;
+      }
+
+      .step {
+        grid-template-columns: 32px 1fr;
+      }
+
+      .step code {
+        grid-column: 2;
+        width: max-content;
+      }
+
+      .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="brand" href="#top" aria-label="SOLO">
+          <img src="frontend/public/brand/solo-app-icon.png" alt="">
+          <span class="brand-name">
+            <strong>SOLO</strong>
+            <span>自然语言驱动的自动化测试工作台</span>
+          </span>
+        </a>
+        <div class="nav-links">
+          <a href="#features">能力</a>
+          <a href="#workflow">流程</a>
+          <a href="#scenario">场景</a>
+          <a href="https://github.com/CrDym/AI_Web_Tester" target="_blank" rel="noreferrer">GitHub</a>
+          <a class="btn btn-primary" href="http://127.0.0.1:5173/">打开控制台</a>
+        </div>
+      </div>
+    </nav>
+
+    <header id="top" class="hero">
+      <div class="section-inner hero-grid">
+        <div>
+          <div class="eyebrow">
+            <span class="dot"></span>
+            SOLO AI Testing Workspace
+          </div>
+          <h1>写下目标，<span>SOLO 完成验证</span></h1>
+          <p class="hero-copy">
+            SOLO 把自然语言用例、浏览器执行、失败诊断、自愈定位和运行审计收拢到一个工作台里，让自动化测试更稳定、更可追踪。
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="http://127.0.0.1:5173/">进入 SOLO</a>
+            <a class="btn btn-secondary" href="#workflow">查看工作流</a>
+            <a class="btn btn-secondary" href="https://github.com/CrDym/AI_Web_Tester" target="_blank" rel="noreferrer">GitHub 项目</a>
+          </div>
+          <div class="hero-note">
+            <span><i class="dot"></i>意图驱动</span>
+            <span><i class="dot"></i>自愈审计</span>
+            <span><i class="dot"></i>Chrome 录制插件</span>
+          </div>
+        </div>
+
+        <div class="hero-card" aria-label="SOLO 产品预览">
+          <div class="browser-bar">
+            <div class="traffic"><i></i><i></i><i></i></div>
+            <div class="browser-title">SOLO Run Console</div>
+          </div>
+          <div class="workbench">
+            <img class="lockup" src="frontend/public/brand/solo-lockup.png" alt="SOLO">
+            <div class="run-panel">
+              <div class="run-head">
+                <strong>checkout_flow.spec</strong>
+                <span class="status">Verified</span>
+              </div>
+              <div class="steps">
+                <div class="step">
+                  <div class="step-icon">1</div>
+                  <div>
+                    <strong>写下测试目标</strong>
+                    <span>例如：登录后进入订单管理页面</span>
+                  </div>
+                  <code>intent</code>
+                </div>
+                <div class="step">
+                  <div class="step-icon">2</div>
+                  <div>
+                    <strong>浏览器自动执行</strong>
+                    <span>selector 缺失时根据意图定位元素</span>
+                  </div>
+                  <code>run</code>
+                </div>
+                <div class="step">
+                  <div class="step-icon">3</div>
+                  <div>
+                    <strong>失败诊断与自愈</strong>
+                    <span>保留截图、日志、原因和修复建议</span>
+                  </div>
+                  <code>audit</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section id="features">
+      <div class="section-inner">
+        <div class="section-title">
+          <h2>把“写脚本”变成“描述目标”</h2>
+          <p>传统 UI 自动化被 selector 和页面结构牵着走。SOLO 让测试步骤以意图为中心，同时保留工程化运行、审计和回写能力。</p>
+        </div>
+        <div class="features">
+          <article class="feature">
+            <div class="feature-icon">✓</div>
+            <h3>自然语言用例</h3>
+            <p>用一句目标描述生成结构化测试步骤。每一步都能保留 intent，方便人理解，也方便 AI 定位和诊断。</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon">↻</div>
+            <h3>AI 自愈定位</h3>
+            <p>当 selector 失效时，SOLO 会结合 DOM、截图和意图寻找候选元素，并记录原 selector、新 selector 和原因。</p>
+          </article>
+          <article class="feature">
+            <div class="feature-icon">◎</div>
+            <h3>运行审计闭环</h3>
+            <p>每次执行都保留日志、截图、失败原因、token 消耗和自愈记录，让测试结果可以追踪、复盘和回写。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="section-inner">
+        <div class="section-title">
+          <h2>从目标到验证，保持一个闭环</h2>
+          <p>SOLO 的工作流围绕真实团队的回归测试维护展开：创建、执行、诊断、修复、沉淀。</p>
+        </div>
+        <div class="flow">
+          <div class="flow-row">
+            <div class="flow-kicker"><span class="flow-index">01</span> 生成用例</div>
+            <p>输入自然语言测试目标，或通过 Chrome 录制插件在真实页面录制操作，同步到控制台形成可维护用例。</p>
+          </div>
+          <div class="flow-row">
+            <div class="flow-kicker"><span class="flow-index">02</span> 执行验证</div>
+            <p>按用例或套件运行浏览器测试。支持 setup case、运行历史、数据集变量和环境配置。</p>
+          </div>
+          <div class="flow-row">
+            <div class="flow-kicker"><span class="flow-index">03</span> 诊断自愈</div>
+            <p>失败后生成根因说明和修复建议；selector 变化时产出自愈记录，批准后可写回用例。</p>
+          </div>
+          <div class="flow-row">
+            <div class="flow-kicker"><span class="flow-index">04</span> 审计沉淀</div>
+            <p>保留运行日志、截图对比、token 消耗和失败分类，让自动化测试资产持续变稳。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="scenario">
+      <div class="section-inner">
+        <div class="section-title">
+          <h2>适合需要长期维护 UI 回归的团队</h2>
+          <p>SOLO 不是一次性的录制工具，而是让测试资产可读、可诊断、可迭代的工作台。</p>
+        </div>
+        <div class="audience">
+          <article class="audience-card dark">
+            <h3>给测试团队</h3>
+            <p>用自然语言描述业务验证点，降低编写和维护成本；失败后可以直接看截图、日志和自愈审计，不再只看到一条报错。</p>
+          </article>
+          <article class="audience-card">
+            <h3>给研发团队</h3>
+            <p>把关键业务流程沉淀成可运行的回归套件。页面结构变更后，SOLO 能辅助定位影响范围并提供修复建议。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="section-inner">
+        <div class="cta-box">
+          <div>
+            <h2>写下目标，SOLO 完成验证</h2>
+            <p>自然语言驱动的自动化测试工作台，从第一条用例开始建立稳定的测试闭环。</p>
+          </div>
+          <div class="cta-actions">
+            <a class="btn btn-secondary" href="https://github.com/CrDym/AI_Web_Tester" target="_blank" rel="noreferrer">查看 GitHub</a>
+            <a class="btn btn-primary" href="http://127.0.0.1:5173/">打开控制台</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="footer-inner">
+        <span>SOLO · AI 自动化测试助手</span>
+        <a href="https://github.com/CrDym/AI_Web_Tester" target="_blank" rel="noreferrer">github.com/CrDym/AI_Web_Tester</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

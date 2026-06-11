@@ -3,38 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SOLO AI 录制器</title>
+  <title>SOLO Recorder</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
+  <main class="popup-shell">
   <div class="header">
     <div class="logo">
       <div class="logo-badge" aria-hidden="true">
         <img src="../icons/icon128.png" alt="" draggable="false">
       </div>
       <div class="logo-text">
-        <h1>SOLO AI</h1>
-        <div class="sub">录制器</div>
+        <h1>SOLO Recorder</h1>
+        <div class="sub">自然语言测试录制</div>
       </div>
     </div>
-    <div class="pill" id="theme-pill">自动主题</div>
+    <button class="pill theme-toggle" id="theme-pill" type="button" title="切换颜色模式">跟随系统</button>
   </div>
 
   <div class="panel">
-    <div class="status-box">
-      <div class="status-indicator">
-        <div id="status-dot" class="dot"></div>
-        <span id="status-text">系统就绪</span>
+    <section class="status-card" aria-label="录制状态">
+      <div class="status-top">
+        <div class="status-indicator">
+          <div id="status-dot" class="dot"></div>
+          <span id="status-text">系统就绪</span>
+        </div>
+        <span class="status-chip">Chrome</span>
       </div>
       <div class="action-counter">
-        <span class="label">已录制动作</span>
         <span id="action-count" class="count font-mono">0</span>
+        <span class="label">当前动作数</span>
       </div>
-    </div>
+    </section>
 
     <div id="sync-status" class="sync-status"></div>
 
-    <div class="buttons">
+    <div class="buttons primary-actions">
       <button id="start-btn" class="btn btn-primary">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>
         开始录制
@@ -43,20 +47,23 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
         停止并同步
       </button>
+    </div>
+    <div class="buttons secondary-actions">
       <button id="open-console-btn" class="btn btn-secondary">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg>
-        打开控制台
+        控制台
       </button>
       <button id="clear-btn" class="btn btn-secondary">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-        清空数据
+        清空
       </button>
     </div>
   </div>
 
   <div class="footer">
-    <p>自然语言生成用例 · 可视化回放 · 自愈与审计</p>
+    <p>写下目标，SOLO 完成验证</p>
   </div>
+  </main>
 
   <script src="popup.js"></script>
 </body>

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI Tester Recorder",
+    "name": "SOLO Recorder",
   "version": "1.0",
-  "description": "录制带有自然语言意图的 UI 交互，为 AI Web Tester 生成测试脚本",
+    "description": "录制带有自然语言意图的 UI 交互，为 SOLO 生成可验证的测试用例",
   "permissions": [
     "activeTab",
     "storage",

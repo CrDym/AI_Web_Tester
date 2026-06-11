@@ -2,22 +2,87 @@
 document.addEventListener('DOMContentLoaded', () => {
     const CONSOLE_URL = 'http://127.0.0.1:5173/';
     const API_BASE = 'http://127.0.0.1:8000';
+    const THEME_STORAGE_KEY = 'solo_recorder_theme';
+    const THEME_OPTIONS = ['auto', 'light', 'dark'];
+    const THEME_LABELS = {
+        auto: '跟随系统',
+        light: '浅色',
+        dark: '深色'
+    };
 
     const themePill = document.getElementById('theme-pill');
-    function applyTheme() {
+    let themeMode = 'auto';
+    let systemDarkQuery = null;
+
+    function getSystemDark() {
         try {
-            const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-            document.body.classList.toggle('dark', !!isDark);
-            if (themePill) themePill.textContent = isDark ? '深色' : '浅色';
+            return !!(systemDarkQuery && systemDarkQuery.matches);
+        } catch (e) {}
+        return false;
+    }
+
+    function applyTheme() {
+        const isDark = themeMode === 'dark' || (themeMode === 'auto' && getSystemDark());
+        document.body.classList.toggle('dark', isDark);
+        if (themePill) {
+            themePill.textContent = THEME_LABELS[themeMode] || THEME_LABELS.auto;
+            themePill.setAttribute('aria-label', `颜色模式：${themePill.textContent}`);
+            themePill.setAttribute('aria-pressed', themeMode !== 'auto' ? 'true' : 'false');
+        }
+    }
+
+    function persistTheme(nextTheme) {
+        try {
+            if (chrome && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ [THEME_STORAGE_KEY]: nextTheme });
+                return;
+            }
+        } catch (e) {}
+
+        try {
+            window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
         } catch (e) {}
     }
+
+    function setThemeMode(nextTheme, shouldPersist) {
+        themeMode = THEME_OPTIONS.includes(nextTheme) ? nextTheme : 'auto';
+        applyTheme();
+        if (shouldPersist) persistTheme(themeMode);
+    }
+
+    function loadThemePreference() {
+        try {
+            if (chrome && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.get(THEME_STORAGE_KEY, (result) => {
+                    setThemeMode(result && result[THEME_STORAGE_KEY], false);
+                });
+                return;
+            }
+        } catch (e) {}
+
+        try {
+            setThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY), false);
+        } catch (e) {
+            setThemeMode('auto', false);
+        }
+    }
+
     try {
         if (window.matchMedia) {
-            const m = window.matchMedia('(prefers-color-scheme: dark)');
-            if (m && m.addEventListener) m.addEventListener('change', applyTheme);
+            systemDarkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            if (systemDarkQuery && systemDarkQuery.addEventListener) systemDarkQuery.addEventListener('change', applyTheme);
+            else if (systemDarkQuery && systemDarkQuery.addListener) systemDarkQuery.addListener(applyTheme);
         }
     } catch (e) {}
-    applyTheme();
+    loadThemePreference();
+
+    if (themePill) {
+        themePill.addEventListener('click', () => {
+            const currentIndex = THEME_OPTIONS.indexOf(themeMode);
+            const nextTheme = THEME_OPTIONS[(currentIndex + 1) % THEME_OPTIONS.length];
+            setThemeMode(nextTheme, true);
+        });
+    }
 
     const startBtn = document.getElementById('start-btn');
     const stopBtn = document.getElementById('stop-btn');

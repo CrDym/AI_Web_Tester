@@ -103,20 +103,25 @@ function ensureOverlay() {
 
         const logo = document.createElement("div");
         logo.className = "ai-logo";
-        logo.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <path d="m7 11 2-2-2-2"></path>
-            <path d="M11 13h6"></path>
-          </svg>
-        `;
+        const logoImg = document.createElement("img");
+        logoImg.src = chrome.runtime.getURL("icons/icon128.png");
+        logoImg.alt = "";
+        logoImg.draggable = false;
+        logo.appendChild(logoImg);
 
         overlayDotEl = document.createElement("div");
         overlayDotEl.className = "ai-dot";
 
         const titleText = document.createElement("div");
-        titleText.className = "ai-title-text";
-        titleText.textContent = "SOLO AI 录制器";
+        titleText.className = "ai-title-copy";
+        const titleName = document.createElement("div");
+        titleName.className = "ai-title-text";
+        titleName.textContent = "SOLO Recorder";
+        const titleSub = document.createElement("div");
+        titleSub.className = "ai-title-sub";
+        titleSub.textContent = "正在捕捉页面操作";
+        titleText.appendChild(titleName);
+        titleText.appendChild(titleSub);
 
         title.appendChild(logo);
         title.appendChild(titleText);
@@ -144,17 +149,23 @@ function ensureOverlay() {
         const row = document.createElement("div");
         row.className = "ai-row";
         overlayStatusEl = document.createElement("div");
-        overlayStatusEl.innerHTML = `状态：<strong>未开始</strong>`;
+        overlayStatusEl.className = "ai-stat";
+        overlayStatusEl.innerHTML = `<span>状态</span><strong>未开始</strong>`;
         overlayCountEl = document.createElement("div");
-        overlayCountEl.innerHTML = `动作：<strong>0</strong>`;
+        overlayCountEl.className = "ai-stat ai-stat-count";
+        overlayCountEl.innerHTML = `<span>动作</span><strong>0</strong>`;
         row.appendChild(overlayStatusEl);
         row.appendChild(overlayCountEl);
 
+        const lastLabel = document.createElement("div");
+        lastLabel.className = "ai-last-label";
+        lastLabel.textContent = "最近记录";
         overlayLastEl = document.createElement("div");
         overlayLastEl.className = "ai-last";
         overlayLastEl.textContent = "等待录制动作…";
 
         body.appendChild(row);
+        body.appendChild(lastLabel);
         body.appendChild(overlayLastEl);
 
         overlayEl.appendChild(header);
@@ -207,8 +218,8 @@ function updateOverlay() {
     if (!overlayEl || !overlayDotEl || !overlayStatusEl || !overlayCountEl || !overlayLastEl) return;
     overlayEl.classList.toggle("ai-tester-hidden", !isRecording);
     overlayDotEl.classList.toggle("ai-on", !!isRecording);
-    overlayStatusEl.innerHTML = `状态：<strong>${isRecording ? "录制中" : "未开始"}</strong>`;
-    overlayCountEl.innerHTML = `动作：<strong>${actionCount}</strong>`;
+    overlayStatusEl.innerHTML = `<span>状态</span><strong>${isRecording ? "录制中" : "未开始"}</strong>`;
+    overlayCountEl.innerHTML = `<span>动作</span><strong>${actionCount}</strong>`;
     overlayLastEl.textContent = lastRecordedText || "等待录制动作…";
 }
 
