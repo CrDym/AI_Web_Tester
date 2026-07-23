@@ -9,12 +9,13 @@ from typing import Any, Callable, Dict, List, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 try:
+    from src.ai_tester.llm_utils import create_chat_openai
     from web_server.runtime_utils import mask_secret
 except Exception:
+    from llm_utils import create_chat_openai
     from runtime_utils import mask_secret
 
 
@@ -187,8 +188,10 @@ def create_config_router(deps: ConfigRouteDeps) -> APIRouter:
         except Exception:
             data = {}
 
-        api_base = str(data.get("OPENAI_API_BASE", "https://api.openai.com/v1") or "").strip()
-        api_key = str(data.get("OPENAI_API_KEY", "") or "").strip()
+        env_path = os.path.join(deps.get_project_root(), ".env")
+        saved_cfg = _parse_env_values(_read_env_lines(env_path))
+        api_base = str(data.get("OPENAI_API_BASE") or saved_cfg.get("OPENAI_API_BASE") or "https://api.openai.com/v1").strip()
+        api_key = str(data.get("OPENAI_API_KEY") or saved_cfg.get("OPENAI_API_KEY") or "").strip()
         model_name = str(data.get("OPENAI_MODEL_NAME", "gpt-4o-mini") or "gpt-4o-mini").strip()
 
         if not api_base:
@@ -198,7 +201,7 @@ def create_config_router(deps: ConfigRouteDeps) -> APIRouter:
 
         try:
             t0 = time.time()
-            llm = ChatOpenAI(
+            llm = create_chat_openai(
                 model=model_name,
                 api_key=api_key,
                 base_url=api_base,

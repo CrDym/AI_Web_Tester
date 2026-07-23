@@ -58,7 +58,7 @@ export default function SettingsModal({
         <div className="flex items-center justify-between mb-5 shrink-0">
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-semibold text-zinc-900 flex items-center gap-2">
-              <Settings className="w-5 h-5 text-[#10a37f]" />
+              <Settings className="w-5 h-5 text-[#13966f]" />
               控制台设置
             </h2>
             <div className="flex bg-zinc-100 border border-zinc-200 rounded-xl p-1">
@@ -90,7 +90,7 @@ export default function SettingsModal({
                   type="text"
                   value={apiBase}
                   onChange={e => onApiBaseChange(e.target.value)}
-                  className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all placeholder:text-zinc-400"
+                  className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:border-[#13966f]/50 focus:ring-2 focus:ring-[#13966f]/15 transition-all placeholder:text-zinc-400"
                   placeholder="https://api.openai.com/v1"
                 />
               </div>
@@ -100,7 +100,7 @@ export default function SettingsModal({
                   type="text"
                   value={modelName}
                   onChange={e => onModelNameChange(e.target.value)}
-                  className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all placeholder:text-zinc-400"
+                  className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:border-[#13966f]/50 focus:ring-2 focus:ring-[#13966f]/15 transition-all placeholder:text-zinc-400"
                   placeholder="gpt-4o-mini"
                 />
               </div>
@@ -111,7 +111,7 @@ export default function SettingsModal({
                     type="password"
                     value={apiKey}
                     onChange={e => onApiKeyChange(e.target.value)}
-                    className="flex-1 bg-white border border-zinc-200 rounded-xl px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all placeholder:text-zinc-400"
+                    className="flex-1 bg-white border border-zinc-200 rounded-xl px-4 py-2.5 text-sm text-zinc-900 focus:outline-none focus:border-[#13966f]/50 focus:ring-2 focus:ring-[#13966f]/15 transition-all placeholder:text-zinc-400"
                     placeholder={apiKeySet ? '已保存，留空表示不修改' : 'sk-...'}
                   />
                   <button
@@ -138,7 +138,7 @@ export default function SettingsModal({
                   <label className="block text-xs font-semibold text-zinc-600 uppercase tracking-wider">多环境配置 (Environments)</label>
                   <button
                     onClick={() => onEnvsChange([...envs, { id: `env_${Date.now()}`, name: '新环境', base_url: '' }])}
-                    className="text-xs text-[#10a37f] hover:text-[#0e8a6a] font-medium transition-colors"
+                    className="text-xs text-[#13966f] hover:text-[#087653] font-medium transition-colors"
                   >
                     + 添加环境
                   </button>
@@ -157,7 +157,7 @@ export default function SettingsModal({
                             newEnvs[i] = { ...newEnvs[i], name: e.target.value };
                             onEnvsChange(newEnvs);
                           }}
-                          className="w-1/3 bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:border-[#10a37f]/50 transition-colors placeholder:text-zinc-400"
+                          className="w-1/3 bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:border-[#13966f]/50 transition-colors placeholder:text-zinc-400"
                           placeholder="名称 (如 QA)"
                         />
                         <input
@@ -168,7 +168,7 @@ export default function SettingsModal({
                             newEnvs[i] = { ...newEnvs[i], base_url: e.target.value };
                             onEnvsChange(newEnvs);
                           }}
-                          className="flex-1 bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:border-[#10a37f]/50 transition-colors placeholder:text-zinc-400"
+                          className="flex-1 bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:border-[#13966f]/50 transition-colors placeholder:text-zinc-400"
                           placeholder="Base URL"
                         />
                         <button
@@ -195,7 +195,7 @@ export default function SettingsModal({
                     <button
                       key={f}
                       onClick={() => onActivePromptFileChange(f)}
-                      className={`w-full text-left rounded-xl px-3 py-2.5 mb-1 border transition-all ${active ? 'bg-white dark:bg-zinc-950 border-[#10a37f]/30 shadow-sm text-zinc-900 dark:text-zinc-100' : 'border-transparent text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-950/70'}`}
+                      className={`w-full text-left rounded-xl px-3 py-2.5 mb-1 border transition-all ${active ? 'bg-white dark:bg-zinc-950 border-[#13966f]/30 shadow-sm text-zinc-900 dark:text-zinc-100' : 'border-transparent text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-950/70'}`}
                     >
                       <div className="text-xs font-semibold truncate capitalize">{label}</div>
                       <div className="mt-0.5 text-[10px] font-mono text-zinc-400 truncate">{f}</div>
@@ -246,7 +246,7 @@ export default function SettingsModal({
           <button
             onClick={onSave}
             disabled={savingSettings}
-            className="px-6 py-2.5 rounded-xl text-sm font-medium text-white bg-[#10a37f] hover:bg-[#0e8a6a] flex items-center gap-2 transition-all disabled:opacity-50"
+            className="px-6 py-2.5 rounded-xl text-sm font-medium text-white bg-[#13966f] hover:bg-[#087653] flex items-center gap-2 transition-all disabled:opacity-50"
           >
             {savingSettings ? <RotateCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             保存设置

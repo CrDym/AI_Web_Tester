@@ -24,7 +24,7 @@ export default function RunDiagnosticsPanel({ run, stats }: RunDiagnosticsPanelP
       <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
-            <Activity className="w-3.5 h-3.5 text-[#10a37f]" />
+            <Activity className="w-3.5 h-3.5 text-[#13966f]" />
             SOLO 运行诊断
           </div>
           <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{run.id}</div>

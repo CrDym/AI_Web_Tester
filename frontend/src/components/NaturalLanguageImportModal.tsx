@@ -42,8 +42,8 @@ export default function NaturalLanguageImportModal({
         <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between shrink-0">
           <div>
             <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-3">
-              <div className="p-2 bg-[#10a37f]/10 rounded-xl border border-[#10a37f]/20">
-                <FileJson className="w-5 h-5 text-[#10a37f]" />
+              <div className="p-2 bg-[#13966f]/10 rounded-xl border border-[#13966f]/20">
+                <FileJson className="w-5 h-5 text-[#13966f]" />
               </div>
               导入自然语言用例
             </h2>
@@ -59,11 +59,11 @@ export default function NaturalLanguageImportModal({
             <div className="grid grid-cols-2 gap-3 shrink-0">
               <div>
                 <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">默认分组</label>
-                <input value={group} onChange={(e) => onGroupChange(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#10a37f]/50" placeholder="导入用例" />
+                <input value={group} onChange={(e) => onGroupChange(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#13966f]/50" placeholder="导入用例" />
               </div>
               <div>
                 <label className="block text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">默认起始 URL</label>
-                <input value={startUrl} onChange={(e) => onStartUrlChange(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#10a37f]/50" placeholder="可选" />
+                <input value={startUrl} onChange={(e) => onStartUrlChange(e.target.value)} className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#13966f]/50" placeholder="可选" />
               </div>
             </div>
             <div className="flex items-center justify-between gap-3 shrink-0">
@@ -76,7 +76,7 @@ export default function NaturalLanguageImportModal({
             <textarea
               value={text}
               onChange={(e) => onTextChange(e.target.value)}
-              className="flex-1 min-h-[260px] resize-none bg-zinc-50 dark:bg-black border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none focus:border-[#10a37f]/50 custom-scrollbar leading-relaxed"
+              className="flex-1 min-h-[260px] resize-none bg-zinc-50 dark:bg-black border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none focus:border-[#13966f]/50 custom-scrollbar leading-relaxed"
               placeholder={`示例：\n模块：登录\n用例：手机号验证码登录成功\n步骤：\n1. 打开登录页\n2. 输入手机号 13800138000\n3. 点击获取验证码\n4. 输入验证码 260507\n5. 点击登录\n预期结果：进入首页并显示用户昵称`}
             />
           </div>
@@ -97,7 +97,7 @@ export default function NaturalLanguageImportModal({
 
             <div className="grid grid-cols-3 gap-2 shrink-0">
               <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2"><div className="text-[10px] text-zinc-500">识别用例</div><div className="text-lg font-semibold">{items.length}</div></div>
-              <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2"><div className="text-[10px] text-zinc-500">可导入</div><div className="text-lg font-semibold text-[#0e8a6a]">{items.filter((i) => i.valid).length}</div></div>
+              <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2"><div className="text-[10px] text-zinc-500">可导入</div><div className="text-lg font-semibold text-[#087653]">{items.filter((i) => i.valid).length}</div></div>
               <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2"><div className="text-[10px] text-zinc-500">已选择</div><div className="text-lg font-semibold">{selected.length}</div></div>
             </div>
 
@@ -128,7 +128,7 @@ export default function NaturalLanguageImportModal({
 
         <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3 shrink-0">
           <button onClick={onClose} disabled={loading} className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-all disabled:opacity-50">取消</button>
-          <button onClick={onConfirm} disabled={loading || selected.length === 0} className="px-6 py-2.5 rounded-xl text-sm font-medium text-white bg-[#10a37f] hover:bg-[#0e8a6a] flex items-center gap-2 transition-all disabled:opacity-50">
+          <button onClick={onConfirm} disabled={loading || selected.length === 0} className="px-6 py-2.5 rounded-xl text-sm font-medium text-white bg-[#13966f] hover:bg-[#087653] flex items-center gap-2 transition-all disabled:opacity-50">
             {loading ? <RotateCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             确认导入 {selected.length} 条
           </button>

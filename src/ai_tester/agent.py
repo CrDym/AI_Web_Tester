@@ -4,7 +4,7 @@ from typing import Dict, Any
 from .driver import PlaywrightDriver
 from .logger import logger
 from . import run_context
-from langchain_openai import ChatOpenAI
+from .llm_utils import create_chat_openai
 from langchain.schema import HumanMessage, SystemMessage
 
 class AITesterAgent:
@@ -25,7 +25,7 @@ class AITesterAgent:
             raise ValueError("未配置大模型名称。请在环境变量或代码中配置 OPENAI_MODEL_NAME。")
 
         # 允许从环境变量读取，或默认使用 OpenAI (国内可替换代理)
-        self.llm = ChatOpenAI(
+        self.llm = create_chat_openai(
             model=final_model_name,
             temperature=temperature,
             max_tokens=2048,

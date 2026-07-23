@@ -8,8 +8,12 @@ from typing import Any, Callable, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
+
+try:
+    from src.ai_tester.llm_utils import create_chat_openai
+except Exception:
+    from llm_utils import create_chat_openai
 
 
 class GenerateCaseReq(BaseModel):
@@ -204,7 +208,7 @@ def create_case_generation_router(deps: CaseGenerationRouteDeps) -> APIRouter:
             return JSONResponse({"error": "请先在设置中配置 OpenAI API Key"}, status_code=400)
 
         try:
-            llm = ChatOpenAI(
+            llm = create_chat_openai(
                 model=model_name,
                 api_key=api_key,
                 base_url=api_base,
@@ -263,7 +267,7 @@ def create_case_generation_router(deps: CaseGenerationRouteDeps) -> APIRouter:
         default_group = (req.default_group or "导入用例").strip()
         default_start_url = (req.default_start_url or "").strip()
         try:
-            llm = ChatOpenAI(
+            llm = create_chat_openai(
                 model=model_name,
                 api_key=api_key,
                 base_url=api_base,

@@ -1275,7 +1275,7 @@ function App() {
   const mainCaseId = mainCaseContext?.id || selectedRun?.case_id || '';
 
   return (
-    <div className="flex h-screen bg-[#f7f7f8] dark:bg-black text-zinc-900 dark:text-zinc-100 antialiased overflow-hidden">
+    <div className="flex h-screen solo-app-surface dark:bg-black text-zinc-900 dark:text-zinc-100 antialiased overflow-hidden">
       {!authUser && (
         <AuthGate
           authMode={authMode}
@@ -1358,7 +1358,7 @@ function App() {
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col h-full bg-white dark:bg-zinc-950 min-w-0">
+      <div className="flex-1 flex flex-col h-full bg-white/92 dark:bg-zinc-950 min-w-0">
         {selectedSuiteRun ? (
           <SuiteRunDetailPanel
             selectedSuiteRun={selectedSuiteRun}
@@ -1373,7 +1373,7 @@ function App() {
         ) : mainCaseContext || (runDetailStandalone && selectedRun) ? (
           <>
             {/* Header Bar */}
-            <div className="h-14 border-b border-zinc-200 bg-white px-6 flex justify-between items-center shrink-0">
+            <div className="h-16 border-b border-zinc-200 dark:border-zinc-800 bg-[#fbfcfb]/95 dark:bg-zinc-950/95 px-6 flex justify-between items-center shrink-0 backdrop-blur">
               <div className="flex items-center gap-3">
                 <div className="flex flex-col leading-tight">
                   <div className="flex items-center gap-2">
@@ -1387,7 +1387,7 @@ function App() {
                       {isDirty ? '未保存' : '已保存'}
                     </span>
                   </div>
-                  <div className="text-[11px] text-zinc-500 font-mono">
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
                     {`CaseID: ${mainCaseId}`}
                   </div>
                 </div>
@@ -1396,7 +1396,7 @@ function App() {
                 <select
                   value={selectedEnvId}
                   onChange={(e) => setSelectedEnvId(e.target.value)}
-                  className="bg-white border border-zinc-200 rounded-xl px-2 py-1.5 text-sm text-zinc-700 outline-none focus:border-[#10a37f]/50"
+                  className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2 py-1.5 text-sm text-zinc-700 dark:text-zinc-300 outline-none focus:border-[#13966f]/50"
                 >
                   <option value="">默认环境</option>
                   {envs.map(env => (
@@ -1408,14 +1408,14 @@ function App() {
                       <button
                         onClick={handleRestoreBackup}
                         title="如果你刚刚点击了错误的 AI 修复建议，可以点击这里撤销"
-                        className="flex items-center gap-2 bg-white hover:bg-zinc-100 text-zinc-900 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-zinc-200"
+                        className="flex items-center gap-2 bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-zinc-200 dark:border-zinc-800"
                       >
                         <History className="w-4 h-4" /> 撤销修复
                       </button>
                       <button
                         onClick={addStep}
                         disabled={!caseDoc}
-                        className="flex items-center gap-2 bg-white hover:bg-zinc-100 disabled:opacity-50 text-zinc-900 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-zinc-200"
+                        className="flex items-center gap-2 bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-zinc-900 dark:text-zinc-100 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-zinc-200 dark:border-zinc-800"
                       >
                       <Plus className="w-4 h-4" /> 新增步骤
                     </button>
@@ -1424,8 +1424,8 @@ function App() {
                       disabled={!caseDoc || !isDirty || saving}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border ${
                         !caseDoc || !isDirty || saving
-                          ? 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
-                          : 'bg-[#10a37f] hover:bg-[#0e8a6a] text-white border-transparent'
+                        ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 border-zinc-200 dark:border-zinc-800 cursor-not-allowed'
+                          : 'bg-[#13966f] hover:bg-[#087653] text-white border-transparent shadow-sm'
                       }`}
                     >
                       <Save className="w-4 h-4" /> {saving ? '保存中' : '保存'}
@@ -1435,7 +1435,7 @@ function App() {
                 {isReplayMode && (
                   <button
                     onClick={() => { if (runDetailStandalone) { setSelectedRunId(null); setSelectedRun(null); setRunDetailStandalone(false); setLogs([]); resetScreenshots(); } else { handleExitReplay(); } }}
-                    className="flex items-center gap-2 bg-white hover:bg-zinc-100 text-zinc-900 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-zinc-200"
+                    className="flex items-center gap-2 bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border border-zinc-200 dark:border-zinc-800"
                   >
                     {runDetailStandalone ? '返回历史' : '返回编辑'}
                   </button>
@@ -1443,7 +1443,7 @@ function App() {
                 {!(isRunning || selectedRun?.status === 'running') ? (
                   <button 
                     onClick={handleRun}
-                    className="flex items-center gap-2 bg-[#10a37f] hover:bg-[#0e8a6a] text-white px-5 py-1.5 rounded-xl text-sm font-semibold transition-colors"
+                    className="flex items-center gap-2 bg-[#13966f] hover:bg-[#087653] text-white px-5 py-2 rounded-xl text-sm font-semibold transition-colors shadow-[0_10px_24px_rgba(19,150,111,0.18)]"
                   >
                     <Play className="w-4 h-4 fill-current" /> 运行测试
                   </button>
@@ -1461,21 +1461,21 @@ function App() {
             {/* Content Area - Split View */}
             <div className="flex-1 flex overflow-hidden min-h-0">
               {/* Left Panel: Script Content / Logs */}
-              <div className="flex-1 flex flex-col border-r border-zinc-200 bg-white min-w-0">
+              <div className="flex-1 flex flex-col border-r border-zinc-200 dark:border-zinc-800 bg-white/88 dark:bg-zinc-950 min-w-0">
                 {/* Script View */}
                 <div className={`${isReplayMode ? 'h-full' : 'h-2/3'} flex flex-col border-b border-zinc-200 min-h-0`}>
                   {isReplayMode ? (
-                    <div className="px-4 py-2 bg-zinc-50 text-xs font-semibold text-zinc-600 flex items-center justify-between border-b border-zinc-200">
+                    <div className="px-4 py-2.5 bg-[#f7faf8] dark:bg-zinc-900/70 text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
                       <div className="flex items-center gap-2">
                         <History className="w-3.5 h-3.5" />
                         运行回放
                       </div>
-                      <div className="text-xs text-zinc-500 font-mono">
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
                         {selectedRun ? `${formatStatus(selectedRun.status)} ${formatRunTime(selectedRun.started_at)}` : selectedRunId}
                       </div>
                     </div>
                   ) : (
-                    <div className="px-4 py-2 bg-zinc-50 text-xs font-semibold text-zinc-600 flex items-center justify-between border-b border-zinc-200">
+                    <div className="px-4 py-2.5 bg-[#f7faf8] dark:bg-zinc-900/70 text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
                       <div className="flex items-center gap-2">
                         <FileJson className="w-3.5 h-3.5" />
                         {leftTab === 'editor' ? '用例编辑器' : leftTab === 'dataset' ? '变量与数据集' : '生成脚本 (Python)'}
@@ -1586,7 +1586,7 @@ function App() {
                   <div className="h-1/3 flex flex-col min-h-0 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-black">
                     <div className="px-4 py-2.5 bg-white dark:bg-zinc-950 text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
                       <div className="flex items-center gap-2">
-                        <div className={`w-6 h-6 rounded-xl flex items-center justify-center border ${isRunning ? 'border-[#10a37f]/25 bg-[#10a37f]/10 text-[#0e8a6a] dark:text-[#10a37f]' : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400'}`}>
+                        <div className={`w-6 h-6 rounded-xl flex items-center justify-center border ${isRunning ? 'border-[#13966f]/25 bg-[#13966f]/10 text-[#087653] dark:text-[#13966f]' : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400'}`}>
                           <Terminal className="w-3.5 h-3.5" />
                         </div>
                         <div className="flex flex-col leading-tight">
@@ -1596,8 +1596,8 @@ function App() {
                       </div>
                       <div className="flex items-center gap-2">
                         {isRunning && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full border border-[#10a37f]/20 bg-[#10a37f]/10 px-2 py-1 text-[10px] font-medium text-[#0e8a6a] dark:text-[#10a37f]">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#10a37f] animate-pulse" />
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-[#13966f]/20 bg-[#13966f]/10 px-2 py-1 text-[10px] font-medium text-[#087653] dark:text-[#13966f]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#13966f] animate-pulse" />
                             LIVE
                           </span>
                         )}

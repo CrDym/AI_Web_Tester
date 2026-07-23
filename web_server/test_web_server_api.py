@@ -128,6 +128,50 @@ def test_config_save_preserves_unknown_env_keys(app_client, tmp_path):
     assert "OPENAI_API_KEY=sk-test-secret-value" in env_text
 
 
+def test_config_test_uses_saved_key_when_request_key_blank(app_client, monkeypatch):
+    _, client, headers = app_client
+    import web_server.routes_config as routes_config
+    seen = {}
+
+    class FakeLLM:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def invoke(self, _messages):
+            class Resp:
+                content = "pong"
+                response_metadata = {}
+
+            return Resp()
+
+    monkeypatch.setattr(routes_config, "create_chat_openai", lambda **kwargs: FakeLLM(**kwargs))
+
+    res = client.post(
+        "/api/config/test",
+        headers=headers,
+        json={
+            "OPENAI_API_BASE": "https://changed.test/v1",
+            "OPENAI_API_KEY": "",
+            "OPENAI_MODEL_NAME": "gpt-next",
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "success"
+    assert seen["api_key"] == "sk-test-secret-value"
+    assert seen["base_url"] == "https://changed.test/v1"
+    assert seen["model"] == "gpt-next"
+
+
+def test_compat_chat_openai_accepts_string_response():
+    from src.ai_tester.llm_utils import CompatChatOpenAI
+
+    llm = CompatChatOpenAI(model="gpt-test", api_key="sk-test", base_url="https://example.test/v1")
+    result = llm._create_chat_result("pong")
+
+    assert result.generations[0].message.content == "pong"
+
+
 def test_prompt_update_creates_backup(app_client):
     app_module, client, headers = app_client
     prompt_path = Path(app_module.PROMPTS_DIR) / "demo.txt"

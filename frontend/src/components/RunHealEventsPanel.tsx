@@ -27,7 +27,7 @@ export default function RunHealEventsPanel({
   return (
     <div className="pt-2 border-t border-zinc-200">
       <div className="text-xs font-semibold text-zinc-500 mb-3 flex items-center gap-2">
-        <ShieldCheck className="w-3.5 h-3.5 text-[#10a37f]" />
+        <ShieldCheck className="w-3.5 h-3.5 text-[#13966f]" />
         SOLO 自愈审计（{events.length}）
       </div>
       {events.length === 0 ? (

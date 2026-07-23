@@ -22,7 +22,7 @@ export default function HealCompareModal({
         <div className="p-4 border-b border-zinc-200 flex justify-between items-start bg-white shrink-0">
           <div className="flex-1 mr-8">
             <h3 className="text-lg text-zinc-900 font-semibold flex items-center gap-2">
-              <Activity className="w-5 h-5 text-[#10a37f]" />
+              <Activity className="w-5 h-5 text-[#13966f]" />
               自愈记录审计: {event.intent || '未知意图'}
             </h3>
             <div className="text-[13px] text-zinc-600 mt-2 flex flex-col gap-1.5 font-mono bg-zinc-50 p-3 rounded-lg border border-zinc-200">
@@ -53,7 +53,7 @@ export default function HealCompareModal({
         <div className="flex flex-1 overflow-hidden bg-zinc-50 p-6 gap-6 relative">
           {loading ? (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm">
-              <Loader2 className="w-8 h-8 text-[#10a37f] animate-spin mb-4" />
+              <Loader2 className="w-8 h-8 text-[#13966f] animate-spin mb-4" />
               <span className="text-sm text-zinc-600">正在加载高清对比截图...</span>
             </div>
           ) : null}

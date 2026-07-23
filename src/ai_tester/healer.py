@@ -97,10 +97,10 @@ import os
 import json
 import hashlib
 from typing import Dict, Any, Optional
-from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from .logger import logger
 from . import run_context
+from .llm_utils import create_chat_openai
 
 class SelfHealer:
     def __init__(self, model_name: str = None, temperature: float = 0.0, use_vision: bool = False, cache_dir: str = ".healer_cache"):
@@ -116,7 +116,7 @@ class SelfHealer:
             raise ValueError("未配置大模型名称。请在环境变量或代码中配置 OPENAI_MODEL_NAME。")
 
         # 独立的 LLM 实例，专用于自愈推理
-        self.llm = ChatOpenAI(
+        self.llm = create_chat_openai(
             model=final_model_name,
             temperature=temperature,
             max_tokens=8192,

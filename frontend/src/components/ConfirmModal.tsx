@@ -12,7 +12,7 @@ export default function ConfirmModal({ options, onClose }: ConfirmModalProps) {
       <div className="bg-white border border-zinc-200 rounded-3xl shadow-[0_18px_60px_rgba(0,0,0,0.16)] w-full max-w-lg p-7 flex flex-col relative overflow-hidden">
         <div className="flex items-start justify-between mb-5 relative z-10">
           <div className="flex items-start gap-3">
-            <div className={`mt-0.5 p-2 rounded-2xl border ${options.destructive ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-[#10a37f]/20 bg-[#10a37f]/10 text-[#0e8a6a]'}`}>
+            <div className={`mt-0.5 p-2 rounded-2xl border ${options.destructive ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-[#13966f]/20 bg-[#13966f]/10 text-[#087653]'}`}>
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
@@ -40,7 +40,7 @@ export default function ConfirmModal({ options, onClose }: ConfirmModalProps) {
             className={`px-6 py-2.5 rounded-xl text-sm font-medium text-white flex items-center gap-2 transition-all ${
               options.destructive
                 ? 'bg-rose-600 hover:bg-rose-700'
-                : 'bg-[#10a37f] hover:bg-[#0e8a6a]'
+                : 'bg-[#13966f] hover:bg-[#087653]'
             }`}
           >
             {options.destructive ? <Trash2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}

@@ -84,8 +84,11 @@ except Exception:
     from routes_suites import SuiteRouteDeps, create_suites_router
     from suite_runner import SuiteRunnerDeps, run_suite_worker, wait_run_finished
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
+try:
+    from src.ai_tester.llm_utils import create_chat_openai
+except Exception:
+    from llm_utils import create_chat_openai
 
 app = FastAPI()
 
@@ -731,7 +734,7 @@ def _make_ai_fix_suggestion(run_meta: Dict[str, Any], case_doc: Dict[str, Any], 
         f"运行上下文:\n{json.dumps(payload, ensure_ascii=False)}"
     )
 
-    llm = ChatOpenAI(model=model_name, api_key=api_key, base_url=api_base, temperature=0)
+    llm = create_chat_openai(model=model_name, api_key=api_key, base_url=api_base, temperature=0)
     resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
     content = (resp.content or "").strip()
     token_usage = None

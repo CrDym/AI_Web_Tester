@@ -34,7 +34,10 @@ export default function SoloLogo({
   if (orientation === 'stacked') {
     return (
       <div className={className}>
-        <img src={lockupSrc} alt="SOLO" className="h-16 w-auto object-contain" draggable={false} />
+        <img src={lockupSrc} alt="SOLO" className="h-16 w-auto object-contain dark:hidden" draggable={false} />
+        <div className="hidden dark:flex items-center">
+          <div className="text-4xl font-semibold leading-none tracking-[0.16em] text-zinc-50">SOLO</div>
+        </div>
         {subtitle ? <div className={subtitleClassName}>{subtitle}</div> : null}
       </div>
     );

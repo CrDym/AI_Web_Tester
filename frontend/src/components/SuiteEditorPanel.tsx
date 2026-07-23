@@ -66,7 +66,7 @@ export default function SuiteEditorPanel({
           <select
             value={suiteDoc.env_id || ''}
             onChange={(e) => onSuiteDocChange({ ...suiteDoc, env_id: e.target.value })}
-            className="bg-white border border-zinc-200 rounded-xl px-2 py-1.5 text-sm text-zinc-700 outline-none focus:border-[#10a37f]/50"
+            className="bg-white border border-zinc-200 rounded-xl px-2 py-1.5 text-sm text-zinc-700 outline-none focus:border-[#13966f]/50"
           >
             <option value="">默认环境</option>
             {envs.map((env) => (
@@ -79,14 +79,14 @@ export default function SuiteEditorPanel({
             className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border ${
               !isSuiteDirty
                 ? 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
-                : 'bg-[#10a37f] hover:bg-[#0e8a6a] text-white border-transparent'
+                : 'bg-[#13966f] hover:bg-[#087653] text-white border-transparent'
             }`}
           >
             <Save className="w-4 h-4" /> 保存套件
           </button>
           <button
             onClick={onRunSuite}
-            className="flex items-center gap-2 bg-[#10a37f] hover:bg-[#0e8a6a] text-white px-5 py-1.5 rounded-xl text-sm font-semibold transition-colors"
+            className="flex items-center gap-2 bg-[#13966f] hover:bg-[#087653] text-white px-5 py-1.5 rounded-xl text-sm font-semibold transition-colors"
           >
             <Play className="w-4 h-4 fill-current" /> 运行套件
           </button>
@@ -104,7 +104,7 @@ export default function SuiteEditorPanel({
                 const nextCaseIds = next ? (suiteDoc.case_ids || []).filter((x) => x !== next) : (suiteDoc.case_ids || []);
                 onSuiteDocChange({ ...suiteDoc, setup_case_id: next, case_ids: nextCaseIds });
               }}
-              className="flex-1 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
+              className="flex-1 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#13966f]/50"
             >
               <option value="">无（每个用例自己处理登录）</option>
               {cases.map((c) => (
@@ -121,7 +121,7 @@ export default function SuiteEditorPanel({
             <select
               value={suiteAddCaseId}
               onChange={(e) => onSuiteAddCaseIdChange(e.target.value)}
-              className="flex-1 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
+              className="flex-1 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#13966f]/50"
             >
               <option value="">选择一个用例...</option>
               {suiteAvailableCases.map((c) => (
@@ -163,14 +163,14 @@ export default function SuiteEditorPanel({
                     <button
                       onClick={() => onMoveCase(idx, 'up')}
                       disabled={idx === 0}
-                      className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30 px-2 py-1 rounded-lg hover:bg-zinc-100"
+                      className="text-xs text-zinc-500 hover:text-[#087653] disabled:opacity-30 px-2 py-1 rounded-lg hover:bg-zinc-100"
                     >
                       ↑
                     </button>
                     <button
                       onClick={() => onMoveCase(idx, 'down')}
                       disabled={idx === (suiteDoc.case_ids || []).length - 1}
-                      className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30 px-2 py-1 rounded-lg hover:bg-zinc-100"
+                      className="text-xs text-zinc-500 hover:text-[#087653] disabled:opacity-30 px-2 py-1 rounded-lg hover:bg-zinc-100"
                     >
                       ↓
                     </button>
@@ -210,7 +210,7 @@ export default function SuiteEditorPanel({
                   key={r.id}
                   onClick={() => onOpenRun(r.id)}
                   className={`cursor-pointer flex items-center justify-between gap-3 px-4 py-3 bg-white hover:bg-zinc-50 transition-colors group ${
-                    selectedSuiteRunId === r.id ? 'bg-[#10a37f]/10' : ''
+                    selectedSuiteRunId === r.id ? 'bg-[#13966f]/10' : ''
                   }`}
                 >
                   <div className="min-w-0 flex-1">

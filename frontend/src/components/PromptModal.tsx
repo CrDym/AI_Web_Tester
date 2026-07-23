@@ -25,7 +25,7 @@ export default function PromptModal({ options, value, onValueChange, onClose }: 
         <div className="flex items-start justify-between mb-6 relative z-10">
           <div>
             <div className="text-xl font-semibold text-zinc-900 flex items-center gap-2">
-              <Pencil className="w-5 h-5 text-[#10a37f]" />
+              <Pencil className="w-5 h-5 text-[#13966f]" />
               {options.title}
             </div>
             {options.description && <div className="text-sm text-zinc-600 mt-1">{options.description}</div>}
@@ -44,7 +44,7 @@ export default function PromptModal({ options, value, onValueChange, onClose }: 
             value={value}
             onChange={(e) => onValueChange(e.target.value)}
             onKeyDown={onKeyDown}
-            className="w-full bg-white border border-zinc-200 rounded-2xl px-5 py-3 text-base text-zinc-900 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15 transition-all placeholder:text-zinc-400"
+            className="w-full bg-white border border-zinc-200 rounded-2xl px-5 py-3 text-base text-zinc-900 focus:outline-none focus:border-[#13966f]/50 focus:ring-2 focus:ring-[#13966f]/15 transition-all placeholder:text-zinc-400"
             placeholder={options.placeholder || ''}
             autoFocus
           />
@@ -59,7 +59,7 @@ export default function PromptModal({ options, value, onValueChange, onClose }: 
           </button>
           <button
             onClick={submit}
-            className="px-6 py-2.5 rounded-xl text-sm font-medium text-white bg-[#10a37f] hover:bg-[#0e8a6a] flex items-center gap-2 transition-all disabled:opacity-50"
+            className="px-6 py-2.5 rounded-xl text-sm font-medium text-white bg-[#13966f] hover:bg-[#087653] flex items-center gap-2 transition-all disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
             {options.confirmText || '确认'}

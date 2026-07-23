@@ -105,7 +105,7 @@ export default function DatasetEditor({ variables, dataset, onVariablesChange, o
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold tracking-wide text-zinc-900 dark:text-zinc-100">用例变量</div>
                 <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                  默认变量，适合单次运行。可在 <code className="text-[#0e8a6a] dark:text-[#10a37f] px-1 bg-[#10a37f]/10 rounded">{'${变量名}'}</code> 中引用。
+                  默认变量，适合单次运行。可在 <code className="text-[#087653] dark:text-[#13966f] px-1 bg-[#13966f]/10 rounded">{'${变量名}'}</code> 中引用。
                 </div>
               </div>
               <div className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
@@ -113,7 +113,7 @@ export default function DatasetEditor({ variables, dataset, onVariablesChange, o
               </div>
             </div>
             <div className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
-              内置 <code className="text-[#0e8a6a] dark:text-[#10a37f] px-1 bg-[#10a37f]/10 rounded">{'${today_ymd}'}</code> 会生成当天验证码格式，例如 260507。
+              内置 <code className="text-[#087653] dark:text-[#13966f] px-1 bg-[#13966f]/10 rounded">{'${today_ymd}'}</code> 会生成当天验证码格式，例如 260507。
             </div>
           </div>
           {variablesError && <div className="mx-4 mt-3 rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-xs text-rose-600 dark:text-rose-300">{variablesError}</div>}

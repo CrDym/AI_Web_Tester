@@ -51,7 +51,7 @@ export default function SuiteRunDetailPanel({
                       {suiteRunVM?.doneCount || 0}/{suiteRunVM?.total || 0}
                     </span>
                     {selectedSuiteRun.status === 'running' && suiteRunVM?.currentCaseId && (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#10a37f]/25 text-[#0e8a6a] bg-[#10a37f]/10 truncate max-w-[260px]">
+                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#13966f]/25 text-[#087653] bg-[#13966f]/10 truncate max-w-[260px]">
                         当前：{suiteRunVM.currentCaseId}
                       </span>
                     )}
@@ -74,7 +74,7 @@ export default function SuiteRunDetailPanel({
                 <div className="mb-6">
                   <div className="h-2 rounded-full bg-zinc-200 overflow-hidden">
                     <div
-                      className="h-full bg-[#10a37f]"
+                      className="h-full bg-[#13966f]"
                       style={{ width: `${suiteRunVM.progressPct}%` }}
                     />
                   </div>
@@ -99,7 +99,7 @@ export default function SuiteRunDetailPanel({
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                   <div className="text-xs text-zinc-500">自愈次数</div>
-                  <div className="text-2xl font-semibold text-[#10a37f] mt-1">{selectedSuiteRun.summary?.heal_total || 0}</div>
+                  <div className="text-2xl font-semibold text-[#13966f] mt-1">{selectedSuiteRun.summary?.heal_total || 0}</div>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                   <div className="text-xs text-zinc-500">Token消耗</div>
@@ -142,7 +142,7 @@ export default function SuiteRunDetailPanel({
                           <div className="text-sm text-zinc-900 truncate flex items-center gap-2">
                             {cases.find((c) => c.id === cid)?.name || cid}
                             {selectedSuiteRun?.setup_case_id && cid === selectedSuiteRun.setup_case_id && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#10a37f]/25 text-[#0e8a6a] bg-[#10a37f]/10 shrink-0">
+                              <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#13966f]/25 text-[#087653] bg-[#13966f]/10 shrink-0">
                                 前置
                               </span>
                             )}

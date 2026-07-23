@@ -20,30 +20,31 @@ export default function EmptyMainPanel() {
   ];
 
   return (
-    <div className="flex-1 overflow-auto bg-[#f7f7f8] dark:bg-black">
+    <div className="flex-1 overflow-auto solo-app-surface dark:bg-black">
       <div className="mx-auto max-w-5xl px-8 py-10">
-        <div className="flex items-start justify-between gap-8 border-b border-zinc-200 dark:border-zinc-800 pb-8">
+        <div className="rounded-[28px] border border-zinc-200/90 bg-white/82 p-7 shadow-[0_18px_60px_rgba(24,24,27,0.07)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-start justify-between gap-8 border-b border-zinc-200 dark:border-zinc-800 pb-7">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-xl border border-[#10a37f]/20 bg-[#10a37f]/10 px-3 py-1.5 text-xs font-semibold text-[#0e8a6a]">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#13966f]/20 bg-[#13966f]/10 px-3 py-1.5 text-xs font-semibold text-[#087653]">
               <Sparkles className="w-3.5 h-3.5" />
               AI 自动化测试助手
             </div>
-            <h2 className="mt-5 text-3xl font-semibold text-zinc-950 dark:text-zinc-50 leading-tight">SOLO 测试工作台</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            <h2 className="mt-5 text-4xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 leading-tight">SOLO 测试工作台</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-600 dark:text-zinc-400">
               从自然语言用例开始，到浏览器执行、失败诊断、自愈修复和运行审计，SOLO 把测试流程收拢在一个可追踪的工作台里。
             </p>
           </div>
           <div className="hidden md:grid grid-cols-2 gap-2 w-64 shrink-0">
-            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-3">
+            <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-[#f7faf8] dark:bg-zinc-950 px-3 py-3">
               <div className="flex items-center gap-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                <PlayCircle className="w-4 h-4 text-[#10a37f]" />
+                <PlayCircle className="w-4 h-4 text-[#13966f]" />
                 Run
               </div>
               <div className="mt-1 text-[11px] text-zinc-500">执行与回放</div>
             </div>
-            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-3">
+            <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-[#f7faf8] dark:bg-zinc-950 px-3 py-3">
               <div className="flex items-center gap-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                <Activity className="w-4 h-4 text-[#10a37f]" />
+                <Activity className="w-4 h-4 text-[#13966f]" />
                 Audit
               </div>
               <div className="mt-1 text-[11px] text-zinc-500">诊断留痕</div>
@@ -53,9 +54,9 @@ export default function EmptyMainPanel() {
 
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-4">
           {capabilities.map((item) => (
-            <div key={item.title} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5">
-              <div className="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center">
-                <item.icon className="w-5 h-5 text-[#10a37f]" />
+            <div key={item.title} className="rounded-2xl border border-zinc-200 bg-[#fbfcfb] p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="w-10 h-10 rounded-xl bg-[#13966f]/10 dark:bg-zinc-900 border border-[#13966f]/15 dark:border-zinc-800 flex items-center justify-center">
+                <item.icon className="w-5 h-5 text-[#13966f]" />
               </div>
               <div className="mt-4 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{item.title}</div>
               <div className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">{item.body}</div>
@@ -63,9 +64,9 @@ export default function EmptyMainPanel() {
           ))}
         </div>
 
-        <div className="mt-8 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden">
+        <div className="mt-8 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden shadow-sm">
           <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-            <SquareTerminal className="w-4 h-4 text-[#10a37f]" />
+            <SquareTerminal className="w-4 h-4 text-[#13966f]" />
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">开始工作</div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-zinc-200 dark:divide-zinc-800">
@@ -86,6 +87,7 @@ export default function EmptyMainPanel() {
             <FileJson className="w-4 h-4" />
             请选择左侧用例或套件进入编辑与运行。
           </div>
+        </div>
         </div>
       </div>
     </div>

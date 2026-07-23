@@ -49,7 +49,7 @@ export const getLogTone = (log: string) => {
   if (kind === 'success') return { icon: '✓', text: 'text-emerald-700 dark:text-emerald-300', iconWrap: 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/25' };
   if (kind === 'error') return { icon: '×', text: 'text-rose-700 dark:text-rose-300', iconWrap: 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/25' };
   if (kind === 'warning') return { icon: '!', text: 'text-amber-700 dark:text-amber-300', iconWrap: 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/25' };
-  if (kind === 'ai') return { icon: 'AI', text: 'text-[#0e8a6a] dark:text-[#10a37f]', iconWrap: 'bg-[#10a37f]/10 text-[#0e8a6a] border-[#10a37f]/20 dark:bg-[#10a37f]/15 dark:text-[#10a37f] dark:border-[#10a37f]/25' };
+  if (kind === 'ai') return { icon: 'AI', text: 'text-[#087653] dark:text-[#13966f]', iconWrap: 'bg-[#13966f]/10 text-[#087653] border-[#13966f]/20 dark:bg-[#13966f]/15 dark:text-[#13966f] dark:border-[#13966f]/25' };
   if (log.includes('🛑')) return { icon: '■', text: 'text-zinc-700 dark:text-zinc-300', iconWrap: 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700' };
   return { icon: '›', text: 'text-zinc-700 dark:text-zinc-300', iconWrap: 'bg-zinc-50 text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-500 dark:border-zinc-800' };
 };

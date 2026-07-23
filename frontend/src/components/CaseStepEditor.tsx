@@ -26,7 +26,7 @@ export default function CaseStepEditor({
           value={caseDoc.start_url || ''}
           onChange={(e) => onCaseDocChange({ ...caseDoc, start_url: e.target.value })}
           placeholder="可选：运行前先 page.goto(...)"
-          className="col-span-5 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15"
+          className="col-span-5 bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#13966f]/50 focus:ring-2 focus:ring-[#13966f]/15"
         />
       </div>
       <div className="flex items-center justify-between">
@@ -40,17 +40,17 @@ export default function CaseStepEditor({
               <div className="flex items-center gap-2 min-w-0">
                 <GripVertical className="w-4 h-4 text-zinc-300 shrink-0" />
                 <div className="text-xs text-zinc-400 font-mono">STEP {idx + 1}</div>
-                <div className="px-2 py-1 rounded-lg border border-[#10a37f]/20 bg-[#10a37f]/10 text-[10px] font-semibold text-[#0e8a6a]">
+                <div className="px-2 py-1 rounded-lg border border-[#13966f]/20 bg-[#13966f]/10 text-[10px] font-semibold text-[#087653]">
                   {s.type || 'click'}
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => onMoveStep(idx, 'up')} disabled={idx === 0} className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30">↑</button>
-                <button onClick={() => onMoveStep(idx, 'down')} disabled={idx === caseDoc.steps.length - 1} className="text-xs text-zinc-500 hover:text-[#0e8a6a] disabled:opacity-30">↓</button>
-                <button onClick={() => onDuplicateStep(idx)} className="p-1.5 rounded-lg text-[#0e8a6a] hover:bg-[#10a37f]/10" title="复制步骤">
+                <button onClick={() => onMoveStep(idx, 'up')} disabled={idx === 0} className="text-xs text-zinc-500 hover:text-[#087653] disabled:opacity-30">↑</button>
+                <button onClick={() => onMoveStep(idx, 'down')} disabled={idx === caseDoc.steps.length - 1} className="text-xs text-zinc-500 hover:text-[#087653] disabled:opacity-30">↓</button>
+                <button onClick={() => onDuplicateStep(idx)} className="p-1.5 rounded-lg text-[#087653] hover:bg-[#13966f]/10" title="复制步骤">
                   <Copy className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => onUpdateStep(idx, { disabled: !s.disabled })} className="text-xs text-zinc-500 hover:text-[#0e8a6a]">{s.disabled ? '启用' : '禁用'}</button>
+                <button onClick={() => onUpdateStep(idx, { disabled: !s.disabled })} className="text-xs text-zinc-500 hover:text-[#087653]">{s.disabled ? '启用' : '禁用'}</button>
                 <button onClick={() => onRemoveStep(idx)} className="p-1.5 rounded-lg text-rose-700 hover:bg-rose-50" title="删除步骤">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -60,7 +60,7 @@ export default function CaseStepEditor({
               <select
                 value={s.type}
                 onChange={(e) => onUpdateStep(idx, { type: e.target.value as StepType })}
-                className="bg-white border border-zinc-200 rounded-xl px-2 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
+                className="bg-white border border-zinc-200 rounded-xl px-2 py-2 text-sm text-zinc-900 outline-none focus:border-[#13966f]/50"
               >
                 <option value="click">点击</option>
                 <option value="input">输入</option>
@@ -78,7 +78,7 @@ export default function CaseStepEditor({
                 <select
                   value={s.assert_type || 'text'}
                   onChange={(e) => onUpdateStep(idx, { assert_type: e.target.value as CaseStep['assert_type'] })}
-                  className="md:col-span-2 bg-white border border-zinc-200 rounded-xl px-2 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50"
+                  className="md:col-span-2 bg-white border border-zinc-200 rounded-xl px-2 py-2 text-sm text-zinc-900 outline-none focus:border-[#13966f]/50"
                 >
                   <option value="text">页面包含文本</option>
                   <option value="url">URL 包含</option>
@@ -88,7 +88,7 @@ export default function CaseStepEditor({
                 <input
                   value={s.intent || ''}
                   onChange={(e) => onUpdateStep(idx, { intent: e.target.value })}
-                  className="md:col-span-2 bg-white border border-[#10a37f]/25 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50 focus:ring-2 focus:ring-[#10a37f]/15"
+                  className="md:col-span-2 bg-white border border-[#13966f]/25 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#13966f]/50 focus:ring-2 focus:ring-[#13966f]/15"
                   placeholder="测试意图，例如：点击登录按钮"
                 />
               )}
@@ -102,7 +102,7 @@ export default function CaseStepEditor({
                 <input
                   value={s.selector || ''}
                   onChange={(e) => onUpdateStep(idx, { selector: e.target.value })}
-                  className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50 font-mono"
+                  className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#13966f]/50 font-mono"
                   placeholder="可选：Playwright selector"
                 />
               </div>
@@ -111,7 +111,7 @@ export default function CaseStepEditor({
               <input
                 value={s.value === undefined || s.value === null ? '' : String(s.value)}
                 onChange={(e) => onUpdateStep(idx, { value: e.target.value })}
-                className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#10a37f]/50 font-mono"
+                className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#13966f]/50 font-mono"
                 placeholder={
                   s.type === 'wait' ? '等待毫秒数，例如 1000' :
                   s.type === 'scroll' ? '滚动方向 (up/down)' :
