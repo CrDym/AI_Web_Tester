@@ -40,6 +40,12 @@ import { useRunScreenshots } from './hooks/useRunScreenshots';
 import { useSettings } from './hooks/useSettings';
 
 function App() {
+  // 用例详情加载请求序号守卫：发起时 ++，响应回调里比对，确保快速切换用例时旧响应被丢弃。
+  const caseLoadSeqRef = useRef(0);
+  // 运行状态轮询定时器（WS 不活跃时的降级方案）
+  const runPollTimerRef = useRef<number | null>(null);
+  // 运行状态轮询序号守卫：切换运行记录时丢弃旧轮询回调
+  const runPollSeqRef = useRef(0);
   const {
     authToken,
     authUser,
@@ -284,6 +290,17 @@ function App() {
     if (theme === 'dark') document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [theme]);
+
+  // 组件卸载时清理轮询定时器与 WS，避免内存泄漏与僵尸连接
+  useEffect(() => {
+    return () => {
+      stopRunPolling();
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch { /* ignore */ }
+        wsRef.current = null;
+      }
+    };
+  }, []);
 
   const logout = () => {
     logoutAuth();
@@ -590,12 +607,62 @@ function App() {
     }
   };
 
+  const stopRunPolling = () => {
+    if (runPollTimerRef.current !== null) {
+      window.clearInterval(runPollTimerRef.current);
+      runPollTimerRef.current = null;
+    }
+  };
+
+  // 进入 running 状态记录详情时：若 WS 不活跃则降级轮询 GET /api/runs/{run_id}。
+  // 收到终态或 WS 重连成功即停轮询。
+  const startRunPolling = (runId: string, wsActive: () => boolean) => {
+    stopRunPolling();
+    const seq = ++runPollSeqRef.current;
+    runPollTimerRef.current = window.setInterval(async () => {
+      if (seq !== runPollSeqRef.current) {
+        stopRunPolling();
+        return;
+      }
+      // 若 WS 已重连成功则停止轮询
+      if (wsActive() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        stopRunPolling();
+        return;
+      }
+      try {
+        const res = await apiClient.get(`/api/runs/${runId}`);
+        if (seq !== runPollSeqRef.current) return;
+        const detail: RunDetail = res.data;
+        if (detail.status === 'completed' || detail.status === 'failed' || detail.status === 'stopped' || detail.status === 'timeout') {
+          stopRunPolling();
+          setIsRunning(false);
+          setSelectedRun(detail);
+          setLogs(detail.logs || []);
+          setLogs(prev => [...prev, `🏁 执行结束，状态: ${formatStatus(detail.status)}`]);
+          if (selectedCase) {
+            fetchRuns(selectedCase.id, selectedCase);
+          }
+        } else {
+          // 仍在运行：更新日志/截图，保持 isRunning
+          setSelectedRun(detail);
+          if (detail.logs && detail.logs.length > 0) {
+            setLogs(detail.logs);
+          }
+        }
+      } catch {
+        // 单次轮询失败忽略，下次重试
+      }
+    }, 2000);
+  };
+
   const loadRunDetail = async (runId: string, standalone = false) => {
     try {
+      // 关闭旧 WS 与旧轮询，确保切换记录时状态干净
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
+      stopRunPolling();
       setIsRunning(false);
 
       const res = await apiClient.get(`/api/runs/${runId}`);
@@ -603,6 +670,52 @@ function App() {
       // 如果后端实际仍在运行，则将 isRunning 设为 true 以显示停止按钮
       if (detail.status === 'running') {
         setIsRunning(true);
+        // 重新订阅 WS：连接 /ws/run/{run_id}?token=...
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/run/${runId}?token=${encodeURIComponent(authToken)}`;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === 'log') {
+            setLogs(prev => [...prev, data.message]);
+          } else if (data.type === 'screenshot') {
+            setScreenshot(data.data);
+          } else if (data.type === 'status') {
+            if (data.status === 'completed' || data.status === 'failed' || data.status === 'stopped' || data.status === 'timeout') {
+              stopRunPolling();
+              setIsRunning(false);
+              setLogs(prev => [...prev, `🏁 执行结束，状态: ${formatStatus(data.status)}`]);
+              if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
+              }
+              if (selectedCase) {
+                fetchRuns(selectedCase.id, selectedCase);
+              }
+              loadRunDetail(runId, standalone);
+            }
+          }
+        };
+        ws.onopen = () => {
+          // WS 重连成功后停止轮询
+          stopRunPolling();
+        };
+        ws.onerror = () => {
+          setLogs(prev => [...prev, '❌ WebSocket 连接错误，已降级为轮询']);
+          // WS 失败时启动轮询兜底
+          if (runPollTimerRef.current === null) {
+            startRunPolling(runId, () => !!wsRef.current);
+          }
+        };
+        // 若短时间 WS 未连上，启动轮询兜底（避免连接挂起时无任何更新）
+        window.setTimeout(() => {
+          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            if (runPollTimerRef.current === null) {
+              startRunPolling(runId, () => !!wsRef.current);
+            }
+          }
+        }, 1500);
       }
       
       setRunLogFilter('all');
@@ -633,6 +746,7 @@ function App() {
   useEffect(() => {
     if (!selectedCase) return;
     const pending = pendingRunToOpen && pendingRunToOpen.case_id === selectedCase.id ? pendingRunToOpen : null;
+    const seq = ++caseLoadSeqRef.current;
     setLogs([]);
     resetScreenshots();
     resetCaseEditor();
@@ -640,10 +754,14 @@ function App() {
     setSelectedRun(null);
     setRunDetailStandalone(false);
     apiClient.get(`/api/cases/${selectedCase.id}`).then(res => {
+      // 请求序号守卫：快速切换用例时丢弃迟到的响应，避免 A 的响应覆盖 B 的 caseDoc
+      if (seq !== caseLoadSeqRef.current) return null;
       setCaseDoc(res.data);
       setLastSaved(JSON.stringify(res.data));
       return apiClient.get(`/api/cases/${selectedCase.id}/script`);
     }).then(res => {
+      if (seq !== caseLoadSeqRef.current) return;
+      if (!res) return;
       setScriptContent(res.data.content || '');
       fetchRuns(selectedCase.id, selectedCase);
       if (pending) {
@@ -652,6 +770,7 @@ function App() {
         setSelectedRunId(null);
       }
     }).catch(e => {
+      if (seq !== caseLoadSeqRef.current) return;
       setScriptContent('Failed to load case: ' + e.message);
     });
   }, [selectedCase]);
@@ -794,7 +913,32 @@ function App() {
     if (!caseDoc) return;
     const ok = await validateDataDriven(caseDoc, '运行');
     if (!ok) return;
-    
+
+    // 若编辑器为 dirty，先自动保存再运行；保存失败则中止运行，避免运行旧版本造成困惑
+    if (isDirty) {
+      setSaving(true);
+      try {
+        await apiClient.put(`/api/cases/${selectedCase.id}`, {
+          start_url: caseDoc.start_url,
+          steps: caseDoc.steps,
+          variables: caseDoc.variables || {},
+          dataset: caseDoc.dataset,
+        });
+        const refreshed = await apiClient.get(`/api/cases/${selectedCase.id}`);
+        setCaseDoc(refreshed.data);
+        setLastSaved(JSON.stringify(refreshed.data));
+        const scriptRes = await apiClient.get(`/api/cases/${selectedCase.id}/script`);
+        setScriptContent(scriptRes.data.content || '');
+        setLogs((prev) => [...prev, '✅ 已自动保存未提交修改，开始运行']);
+      } catch (e: any) {
+        setLogs((prev) => [...prev, `❌ 运行前的自动保存失败，已中止运行: ${e.response?.data?.error || e.message}`]);
+        alert(`运行前的自动保存失败，已中止运行：${e.response?.data?.error || e.message}`);
+        return;
+      } finally {
+        setSaving(false);
+      }
+    }
+
     setIsRunning(true);
     setLogs(['🚀 正在初始化测试环境...']);
     resetScreenshots();
@@ -963,7 +1107,7 @@ function App() {
     if (!ok) return;
     setSaving(true);
     try {
-      await apiClient.put(`/api/cases/${selectedCase.id}`, {
+      const putRes = await apiClient.put(`/api/cases/${selectedCase.id}`, {
         start_url: caseDoc.start_url,
         steps: caseDoc.steps,
         variables: caseDoc.variables || {},
@@ -974,7 +1118,11 @@ function App() {
       setLastSaved(JSON.stringify(refreshed.data));
       const scriptRes = await apiClient.get(`/api/cases/${selectedCase.id}/script`);
       setScriptContent(scriptRes.data.content || '');
-      setLogs((prev) => [...prev, '✅ 用例已保存']);
+      let saveMsg = '✅ 用例已保存';
+      if (putRes.data && putRes.data.backup_saved === false) {
+        saveMsg += '（提示：本次备份写入失败，恢复功能可能回退到更早版本）';
+      }
+      setLogs((prev) => [...prev, saveMsg]);
     } catch (e: any) {
       setLogs((prev) => [...prev, `❌ 保存失败: ${e.message}`]);
     } finally {

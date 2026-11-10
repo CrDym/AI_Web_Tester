@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -14,6 +15,12 @@ try:
     from src.ai_tester.llm_utils import create_chat_openai
 except Exception:
     from llm_utils import create_chat_openai
+
+
+async def _invoke_llm_async(llm, messages):
+    """在线程池中调用 LLM，避免阻塞事件循环。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: llm.invoke(messages))
 
 
 class GenerateCaseReq(BaseModel):
@@ -213,11 +220,13 @@ def create_case_generation_router(deps: CaseGenerationRouteDeps) -> APIRouter:
                 api_key=api_key,
                 base_url=api_base,
                 temperature=0.1,
+                timeout=120,
+                max_retries=1,
                 model_kwargs={"response_format": {"type": "json_object"}},
             )
             system_prompt = _load_prompt_preset(deps.prompts_dir(), "nl2case_system_prompt.txt", "你是一个自动化的测试用例生成专家。请将用户的自然语言测试指令转换为结构化 JSON。")
             user_prompt = f"初始URL: {req.start_url}\n自然语言指令:\n{req.instruction}"
-            response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
+            response = await _invoke_llm_async(llm, [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
             token_usage = None
             try:
                 if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
@@ -272,11 +281,13 @@ def create_case_generation_router(deps: CaseGenerationRouteDeps) -> APIRouter:
                 api_key=api_key,
                 base_url=api_base,
                 temperature=0.1,
+                timeout=120,
+                max_retries=1,
                 model_kwargs={"response_format": {"type": "json_object"}},
             )
             system_prompt = _load_prompt_preset(deps.prompts_dir(), "nl_import_system_prompt.txt", "你是资深测试工程师。请把用户粘贴的自然语言测试用例批量转换为结构化 JSON。")
             user_prompt = f"默认分组: {default_group}\n默认起始URL: {default_start_url}\n自然语言用例内容:\n{text}"
-            resp = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
+            resp = await _invoke_llm_async(llm, [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
             token_usage = None
             try:
                 if hasattr(resp, "response_metadata") and isinstance(resp.response_metadata, dict):

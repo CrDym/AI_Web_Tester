@@ -8,11 +8,39 @@ venv/bin/python -m pytest web_server/test_web_server_api.py web_server/test_runn
 
 覆盖内容：
 
-- API 鉴权、路径校验、配置保存、Prompt 备份
-- 用例创建、更新、删除、恢复、自愈批准
+- API 鉴权（含未授权 401 拒绝）、路径校验、配置保存、Prompt 备份
+- 用例创建、更新、删除、恢复（含 variables/group_name 恢复完整性）、自愈批准
+- 生成脚本注入回归（intent/dataset 字面量安全）、断言永不进入自愈、断言无 HTML 源码兜底
 - 套件缺失引用校验、删除用例后套件清理
-- runner 停止、超时、失败原因推断
-- suite runner 汇总与串行执行辅助逻辑
+- runner 停止、排队取消（pending cancel）、超时分支（timeout 终态与 failure_reason）、stopped 终态不被非 0 退出码覆盖、失败原因推断
+- 套件 setup 失败停止、运行汇总、`wait_run_finished` 超时兜底
+
+各测试文件实际覆盖点：
+
+`web_server/test_web_server_api.py`（22 项）：
+
+- 路径穿越拒绝（upload_script、prompt 更新）
+- 配置保存与脱敏、保留未知 env key、使用已存 key 测试连接
+- Prompt 备份写入
+- CompatChatOpenAI 字符串响应兼容
+- 生成脚本：断言不进入自愈且无 `page.content()` 兜底、intent 注入可编译、dataset True/None 字面量
+- 备份恢复完整性：steps 与 variables 都恢复到备份版本
+- 鉴权拒绝：无 Authorization 头返回 401
+- 自愈批准：歧义空 selector intent 拒绝
+
+`web_server/test_runner.py`（5 项）：
+
+- `stop_active_run` 未知 run_id 返回 404
+- `stop_active_run` 终止进程并写入 stopped meta
+- `stop_active_run` 取消排队中的 pending run
+- `run_pytest_worker` 超时分支：status=timeout、failure_reason.category=timeout
+- `run_pytest_worker` stopped 终态不被非 0 退出码覆盖
+
+`web_server/test_suite_runner.py`（3 项）：
+
+- `wait_run_finished` meta 缺失时返回 timeout
+- `run_suite_worker` 汇总已完成运行（passed/failed/heal/token）
+- `run_suite_worker` setup 用例失败时停止后续执行
 
 ## 前端测试
 

@@ -44,9 +44,8 @@ export function useRunHistory(selectedCase: TestCase | null) {
         });
         nextRuns = (allRes?.data || []).filter((r: RunSummary) => r.case_id && expanded.has(r.case_id));
       }
-      if ((!nextRuns || nextRuns.length === 0) && targetCase && targetCase.name.includes('浏览器录制')) {
-        nextRuns = (allRes?.data || []).filter((r: RunSummary) => (r.case_id || '').startsWith('case_'));
-      }
+      // 严格按 case_id 过滤，避免名称含“浏览器录制”等退化匹配把其他用例历史混入。
+      // 旧数据若无 case_id 字段则不会匹配，显示空列表即可。
       setRuns(nextRuns || []);
       setAllRuns((prev) => {
         const map = new Map<string, RunSummary>();

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import shutil
@@ -86,7 +87,10 @@ def create_runs_router(deps: RunsRouteDeps) -> APIRouter:
         finally:
             db.close()
 
-        suggestion = deps.make_ai_fix_suggestion(run_meta, case_doc, bool(req.force))
+        loop = asyncio.get_event_loop()
+        suggestion = await loop.run_in_executor(
+            None, lambda: deps.make_ai_fix_suggestion(run_meta, case_doc, bool(req.force))
+        )
         run_meta["ai_fix_suggestion"] = suggestion
         try:
             with open(meta_path, "w", encoding="utf-8") as file:

@@ -13,6 +13,7 @@ try:
         DEFAULT_RUN_TIMEOUT_SECONDS,
         RUN_STATUS_COMPLETED,
         RUN_STATUS_FAILED,
+        RUN_STATUS_PENDING,
         RUN_STATUS_RUNNING,
         RUN_STATUS_STOPPED,
         RUN_STATUS_TIMEOUT,
@@ -22,6 +23,7 @@ except Exception:
         DEFAULT_RUN_TIMEOUT_SECONDS,
         RUN_STATUS_COMPLETED,
         RUN_STATUS_FAILED,
+        RUN_STATUS_PENDING,
         RUN_STATUS_RUNNING,
         RUN_STATUS_STOPPED,
         RUN_STATUS_TIMEOUT,
@@ -33,6 +35,7 @@ active_runs_lock = asyncio.Lock()
 active_sessions: Dict[str, Any] = {}
 active_runs: Dict[str, Dict[str, Any]] = {}
 active_processes: Dict[str, asyncio.subprocess.Process] = {}
+active_tasks: Dict[str, "asyncio.Task"] = {}
 
 
 @dataclass
@@ -72,6 +75,28 @@ async def stop_active_run(run_id: str, run_meta_path: Callable[[str], str]) -> T
     process = active_processes.get(safe_id)
     run_meta = active_runs.get(safe_id)
     if process is None:
+        # 排队中（pending）：通过取消任务来释放队列位
+        if run_meta and run_meta.get("status") == RUN_STATUS_PENDING:
+            task = active_tasks.get(safe_id)
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            # 兜底：worker finally 应已清理；若 meta 仍为 pending，标记 stopped
+            if run_meta.get("status") == RUN_STATUS_PENDING:
+                run_meta["status"] = RUN_STATUS_STOPPED
+                run_meta["ended_at"] = int(time.time())
+                run_meta["failure_reason"] = {"category": "cancelled", "message": "排队中被取消"}
+                try:
+                    with open(run_meta_path(safe_id), "w", encoding="utf-8") as f:
+                        json.dump(run_meta, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+            active_runs.pop(safe_id, None)
+            active_tasks.pop(safe_id, None)
+            return 200, {"status": "success", "message": "Queued run cancelled"}
         if run_meta and run_meta.get("status") == RUN_STATUS_RUNNING:
             run_meta["status"] = RUN_STATUS_FAILED
             run_meta["ended_at"] = int(time.time())
@@ -202,7 +227,7 @@ async def start_run(
         "schema_version": 2,
         "id": run_id,
         "case_id": case_id or name,
-        "status": RUN_STATUS_RUNNING,
+        "status": RUN_STATUS_PENDING,
         "started_at": int(time.time()),
         "ended_at": None,
         "duration_ms": None,
@@ -216,7 +241,7 @@ async def start_run(
     with open(deps.run_meta_path(run_id), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         run_pytest_worker(
             deps,
             session_id,
@@ -226,6 +251,7 @@ async def start_run(
             extra_env=extra_env,
         )
     )
+    active_tasks[run_id] = task
     return {"run_id": run_id, "session_id": session_id}
 
 
@@ -237,16 +263,39 @@ async def run_pytest_worker(
     wait_for_ws: bool = True,
     extra_env: Optional[Dict[str, str]] = None,
 ) -> None:
-    if wait_for_ws:
-        for _ in range(50):
-            if session_id in active_sessions:
-                break
-            await asyncio.sleep(0.1)
-    ws = active_sessions.get(session_id)
-    if ws:
-        await ws.send_json({"type": "log", "message": "⏳ 等待队列资源中..."})
+    async def _send(payload: Dict[str, Any]) -> None:
+        # 每次发送时实时取 ws，避免缓存过期连接
+        current_ws = active_sessions.get(session_id)
+        if current_ws is None:
+            return
+        try:
+            await current_ws.send_json(payload)
+        except Exception:
+            pass
+
+    # wait_for_ws 与发送均包裹 try/except，任何 ws 失败不得改变 meta 生命周期
+    try:
+        if wait_for_ws:
+            for _ in range(50):
+                if session_id in active_sessions:
+                    break
+                await asyncio.sleep(0.1)
+        await _send({"type": "log", "message": "⏳ 等待队列资源中..."})
+    except Exception:
+        pass
 
     async with worker_semaphore:
+        # 获得队列资源后才置 running；排队期间可被 cancel 取消
+        run_meta = active_runs.get(session_id)
+        if run_meta is not None and run_meta.get("status") == RUN_STATUS_PENDING:
+            run_meta["status"] = RUN_STATUS_RUNNING
+            try:
+                with open(deps.run_meta_path(session_id), "w", encoding="utf-8") as f:
+                    json.dump(run_meta, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        run_meta = active_runs.get(session_id)
+
         deps.load_env()
         env = os.environ.copy()
         env["PLAYWRIGHT_HEADLESS"] = "1"
@@ -265,13 +314,11 @@ async def run_pytest_worker(
                     continue
                 env[str(k)] = str(v)
 
-        if ws:
-            await ws.send_json({"type": "log", "message": f"🚀 开始执行用例: {os.path.basename(script_path)}"})
-            if not env.get("OPENAI_API_KEY"):
-                await ws.send_json({"type": "log", "message": "⚠️ 未检测到 OPENAI_API_KEY，本次运行将禁用 AI 自愈，仅按录制的 selector 执行。"})
-        run_meta = active_runs.get(session_id)
-
         try:
+            await _send({"type": "log", "message": f"🚀 开始执行用例: {os.path.basename(script_path)}"})
+            if not env.get("OPENAI_API_KEY"):
+                await _send({"type": "log", "message": "⚠️ 未检测到 OPENAI_API_KEY，本次运行将禁用 AI 自愈，仅按录制的 selector 执行。"})
+
             venv_python = os.path.join(deps.project_root, "venv", "bin", "python3")
             python_exec = venv_python if os.path.exists(venv_python) else sys.executable
             venv_bin = os.path.dirname(venv_python)
@@ -321,12 +368,7 @@ async def run_pytest_worker(
                 if "short test summary info" in decoded_line or "FAILED tests/" in decoded_line or "PASSED tests/" in decoded_line:
                     continue
 
-                current_ws = active_sessions.get(session_id)
-                if current_ws:
-                    try:
-                        await current_ws.send_json({"type": "log", "message": decoded_line})
-                    except Exception:
-                        pass
+                await _send({"type": "log", "message": decoded_line})
                 if run_meta is not None:
                     run_meta["logs"].append(decoded_line)
 
@@ -335,17 +377,15 @@ async def run_pytest_worker(
             else:
                 await process.wait()
 
-            current_ws = active_sessions.get(session_id)
             if run_meta is not None and run_meta.get("status") == RUN_STATUS_STOPPED:
                 return
             final_status = RUN_STATUS_TIMEOUT if timed_out else (RUN_STATUS_COMPLETED if process.returncode == 0 else RUN_STATUS_FAILED)
-            if current_ws:
-                try:
-                    if timed_out:
-                        await current_ws.send_json({"type": "log", "message": f"⏱️ 运行超过 {DEFAULT_RUN_TIMEOUT_SECONDS} 秒，已自动停止。"})
-                    await current_ws.send_json({"type": "status", "status": final_status})
-                except Exception:
-                    pass
+            try:
+                if timed_out:
+                    await _send({"type": "log", "message": f"⏱️ 运行超过 {DEFAULT_RUN_TIMEOUT_SECONDS} 秒，已自动停止。"})
+                await _send({"type": "status", "status": final_status})
+            except Exception:
+                pass
             if run_meta is not None:
                 run_meta["status"] = final_status
                 run_meta["ended_at"] = int(time.time())
@@ -366,14 +406,36 @@ async def run_pytest_worker(
                 except Exception:
                     pass
 
-        except Exception as e:
-            current_ws = active_sessions.get(session_id)
-            if current_ws:
+        except asyncio.CancelledError:
+            # 排队中被取消 / 运行中被取消：写终态 stopped，清理后 re-raise
+            if run_meta is not None:
+                run_meta["status"] = RUN_STATUS_STOPPED
+                run_meta["ended_at"] = int(time.time())
+                if run_meta.get("started_at"):
+                    run_meta["duration_ms"] = (run_meta["ended_at"] - run_meta["started_at"]) * 1000
+                run_meta["failure_reason"] = {"category": "cancelled", "message": "排队中被取消"}
+                run_meta.setdefault("logs", []).append("🛑 排队中被取消")
+            try:
+                with open(deps.run_meta_path(session_id), "w", encoding="utf-8") as f:
+                    json.dump(run_meta, f, ensure_ascii=False, indent=2) if run_meta is not None else None
+            except Exception:
+                pass
+            active_processes.pop(session_id, None)
+            active_runs.pop(session_id, None)
+            active_tasks.pop(session_id, None)
+            active_sessions.pop(session_id, None)
+            if cleanup_path:
                 try:
-                    await current_ws.send_json({"type": "log", "message": f"❌ 执行异常: {str(e)}"})
-                    await current_ws.send_json({"type": "status", "status": RUN_STATUS_FAILED})
+                    os.unlink(cleanup_path)
                 except Exception:
                     pass
+            raise
+        except Exception as e:
+            try:
+                await _send({"type": "log", "message": f"❌ 执行异常: {str(e)}"})
+                await _send({"type": "status", "status": RUN_STATUS_FAILED})
+            except Exception:
+                pass
             if run_meta is not None:
                 run_meta["status"] = RUN_STATUS_FAILED
                 run_meta["ended_at"] = int(time.time())
@@ -399,6 +461,7 @@ async def run_pytest_worker(
                 except Exception:
                     pass
                 active_runs.pop(session_id, None)
+            active_tasks.pop(session_id, None)
             if cleanup_path:
                 try:
                     os.unlink(cleanup_path)

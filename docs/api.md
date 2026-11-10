@@ -79,6 +79,8 @@
 |---|---|
 | `/ws/run/{session_id}` | 运行实时日志和截图推送 |
 
+`/ws/run/{session_id}` 连接需携带 `?token=<登录token>` 查询参数，否则连接被服务端关闭（code 1008）。若该运行已结束（completed/failed/stopped/timeout），连接建立后会立即收到一条 `{"type": "status", "status": <终态>}` 消息，便于断线重连后感知运行已结束。
+
 ## Internal
 
 内部接口由运行进程调用，不建议外部使用。

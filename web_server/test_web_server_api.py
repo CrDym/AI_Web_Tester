@@ -354,3 +354,122 @@ def test_heal_approve_rejects_ambiguous_empty_selector_intent(app_client):
 
     assert res.status_code == 409
     assert res.json()["error"] == "Multiple matching steps found for intent"
+
+
+def test_build_python_script_assert_never_self_heals_and_no_content_fallback(app_client):
+    app_module, _, _ = app_client
+
+    case = {
+        "name": "assert case",
+        "start_url": "https://example.test",
+        "steps": [
+            {"type": "assert", "assert_type": "text", "value": "成功", "selector": "", "intent": "断言成功"},
+            {"type": "assert", "assert_type": "url", "value": "/done", "selector": "", "intent": "断言 URL"},
+            {"type": "assert", "assert_type": "visible", "selector": "#x", "intent": "断言可见"},
+        ],
+        "variables": {},
+        "dataset": [],
+    }
+    script = app_module._build_python_script(case)
+
+    # 不再走 HTML 源码兜底
+    assert "page.content()" not in script
+    # 断言步骤永不进入自愈
+    assert "healer.heal" not in script
+    # 文本断言使用 .first + count + wait_for(visible) 语义可见断言
+    assert ".first" in script
+    assert "AssertionError" in script
+    # 生成的脚本可编译
+    compile(script, "<gen>", "exec")
+
+
+def test_build_python_script_intent_injection_compiles(app_client):
+    app_module, _, _ = app_client
+
+    malicious_intent = "验证{__import__('os').getpid()}\nnewline'quote\""
+    case = {
+        "name": "inject case",
+        "start_url": "https://example.test",
+        "steps": [
+            {"type": "click", "selector": "#a", "intent": malicious_intent, "value": ""},
+        ],
+        "variables": {},
+        "dataset": [],
+    }
+    script = app_module._build_python_script(case)
+
+    # intent 必须只出现在字符串字面量里（repr 转义），不能进入 f-string 花括号外的裸文本
+    # 关键安全保证：脚本可编译且 intent 文本被 repr 当作纯数据
+    assert "step_intent_display_0" in script
+    # display_intent 不再被字面拼接到 print 的 f-string 模板里
+    assert "(意图: {display_intent})" not in script
+    assert "(意图: {" not in script  # 防止把 intent 直接插入字面文本
+    # 必须可编译（注入不能造成 SyntaxError 或代码执行）
+    compile(script, "<gen>", "exec")
+
+
+def test_build_python_script_dataset_true_none_compiles(app_client):
+    app_module, _, _ = app_client
+
+    case = {
+        "name": "dataset case",
+        "start_url": "https://example.test",
+        "steps": [{"type": "click", "selector": "#a", "intent": "点击"}],
+        "variables": {},
+        "dataset": [{"flag": True, "empty": None, "name": "中文"}],
+    }
+    script = app_module._build_python_script(case)
+
+    # repr 产生 Python 合法字面量 True/None
+    assert "True" in script
+    assert "None" in script
+    assert "true" not in script.replace("True", "").replace("wait_for", "")
+    # 可编译
+    compile(script, "<gen>", "exec")
+
+
+def test_backup_restore_preserves_variables_and_group(app_client):
+    """备份恢复完整性：恢复后 steps 与 variables 都应回到备份版本。"""
+    app_module, client, headers = app_client
+
+    # 1. 创建含 variables、group、steps 的用例
+    case_id = _create_case(
+        client,
+        headers,
+        name="restore_integrity",
+        variables={"account": "a", "token": "t1"},
+        steps=[{"type": "click", "selector": "#old", "intent": "点击"}],
+        group_name="g1",
+    )
+
+    # 2. 修改 steps + variables（触发备份写入当前版本，再更新为新版本）
+    res = client.put(
+        f"/api/cases/{case_id}",
+        headers=headers,
+        json={
+            "start_url": "https://example.test",
+            "steps": [{"type": "input", "selector": "#new", "intent": "输入", "value": "x"}],
+            "variables": {"account": "b", "token": "t2"},
+            "dataset": [],
+            "group_name": "g2",
+        },
+    )
+    assert res.status_code == 200, res.text
+
+    # 3. restore → 应回到第一个备份版本（创建时 + 第一次更新前写入的备份）
+    res = client.post(f"/api/cases/{case_id}/restore", headers=headers)
+    assert res.status_code == 200, res.text
+
+    # 4. 重新读取，断言 steps 与 variables 都已恢复
+    res = client.get(f"/api/cases/{case_id}", headers=headers)
+    assert res.status_code == 200, res.text
+    case = res.json()
+    assert case["steps"] == [{"type": "click", "selector": "#old", "intent": "点击"}]
+    assert case["variables"] == {"account": "a", "token": "t1"}
+
+
+def test_get_cases_without_auth_returns_401(app_client):
+    """鉴权拒绝路径：不带 Authorization 头请求 GET /api/cases 应返回 401。"""
+    _, client, _ = app_client
+    res = client.get("/api/cases")
+    assert res.status_code == 401

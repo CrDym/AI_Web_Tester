@@ -34,6 +34,7 @@ try:
         active_runs,
         active_runs_lock,
         active_sessions,
+        active_tasks,
         RunnerDeps,
         start_run,
         stop_active_run,
@@ -70,6 +71,7 @@ except Exception:
         active_runs,
         active_runs_lock,
         active_sessions,
+        active_tasks,
         RunnerDeps,
         start_run,
         stop_active_run,
@@ -225,7 +227,9 @@ def _write_case_backup_file(case_id: str, doc: Dict[str, Any]) -> Optional[str]:
         with open(bak, "w", encoding="utf-8") as f:
             json.dump(doc, f, ensure_ascii=False, indent=2)
         return bak
-    except Exception:
+    except Exception as e:
+        # 不中断主操作，但明确记录日志，便于排查"恢复功能回退到更早版本"的问题
+        print(f"[backup] write_case_backup_file failed for {case_id}: {e}", flush=True)
         return None
 
 def _list_cases() -> List[Dict[str, Any]]:
@@ -675,6 +679,12 @@ def _normalize_failure_reason(reason: Any, logs: Optional[List[str]] = None) -> 
     normalized.setdefault("message", "")
     return normalized
 
+async def _invoke_llm_async(llm, messages):
+    """在线程池中调用 LLM，避免阻塞事件循环。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: llm.invoke(messages))
+
+
 def _make_ai_fix_suggestion(run_meta: Dict[str, Any], case_doc: Dict[str, Any], force: bool = False) -> Dict[str, Any]:
     if not force and run_meta.get("ai_fix_suggestion"):
         return run_meta["ai_fix_suggestion"]
@@ -763,6 +773,16 @@ def _make_ai_fix_suggestion(run_meta: Dict[str, Any], case_doc: Dict[str, Any], 
     }
     return suggestion
 
+def _py_literal(value: Any) -> str:
+    """返回可安全内嵌到生成脚本的 Python 字面量（repr 而非 json.dumps）。"""
+    return repr(value)
+
+
+def _py_str(value: Any) -> str:
+    """返回可安全内嵌的 Python 字符串字面量，用于字符串插值场景。"""
+    return repr(str(value if value is not None else ""))
+
+
 def _build_python_script(case: Dict[str, Any]) -> str:
     start_url = case.get("start_url")
     steps = case.get("steps") or []
@@ -787,7 +807,7 @@ def _build_python_script(case: Dict[str, Any]) -> str:
     lines.append("")
     lines.append("from ai_tester import PlaywrightDriver, AITesterAgent, SelfHealer")
     lines.append("")
-    lines.append(f"dataset = {json.dumps(dataset, ensure_ascii=False)}")
+    lines.append(f"dataset = {_py_literal(dataset)}")
     lines.append("")
     lines.append("@pytest.mark.parametrize('dataset_row', dataset)")
     lines.append("def test_recorded_flow(page, dataset_row):")
@@ -811,8 +831,7 @@ def _build_python_script(case: Dict[str, Any]) -> str:
     lines.append("    driver.get_screenshot()")
     lines.append("")
     if start_url:
-        safe_url = start_url.replace('"', "%22")
-        lines.append(f'    resolved_url = _replace_vars("{safe_url}")')
+        lines.append(f"    resolved_url = _replace_vars({repr(str(start_url))})")
         lines.append(f'    page.goto(resolved_url, wait_until="domcontentloaded", timeout=60000)')
         lines.append("    page.wait_for_timeout(1000)")
         lines.append("    driver.get_screenshot()")
@@ -825,15 +844,15 @@ def _build_python_script(case: Dict[str, Any]) -> str:
             continue
 
         stype = step.get("type")
-        selector = (step.get("selector") or "").replace('"', "'")
+        selector = step.get("selector") or ""
         value = step.get("value")
-        intent = (step.get("intent") or f"Step {idx+1}").replace('"', "'")
+        intent = step.get("intent") or f"Step {idx+1}"
 
-        lines.append(f"    selector_{idx} = _replace_vars(\"{selector}\")")
-        value_literal = json.dumps(value if value is not None else "")
-        intent_literal = json.dumps(intent)
-        lines.append(f"    step_value_{idx} = _replace_vars({value_literal})")
-        lines.append(f"    step_intent_{idx} = _replace_vars({intent_literal})")
+        lines.append(f"    selector_{idx} = _replace_vars({_py_str(selector)})")
+        lines.append(f"    step_value_{idx} = _replace_vars({_py_literal(value if value is not None else '')})")
+        lines.append(f"    step_intent_{idx} = _replace_vars({_py_str(intent)})")
+        # display intent 作为普通字符串字面量赋值，避免 intent 进入 f-string 字面文本
+        lines.append(f"    step_intent_display_{idx} = str(step_intent_{idx} or '无意图')")
         if stype == "input":
             lines.append(f"    if not step_value_{idx}:")
             lines.append(f"        m = re.search(r\"输入\\s*[\\\"'“”](.+?)[\\\"'“”]\", step_intent_{idx})")
@@ -845,13 +864,12 @@ def _build_python_script(case: Dict[str, Any]) -> str:
             if "选择" in intent:
                 lines.append(f"    print(f\"   💡 [Step {idx+1}] 建议：该意图包含“选择”，更稳的写法是拆分为 2 步：① 对搜索框输入『AI小车』② 点击下拉结果项（text=AI小车）。\", flush=True)")
 
-        display_intent = intent if intent else "无意图"
-        lines.append(f"    action_type_{idx} = {json.dumps(stype)}")
+        lines.append(f"    action_type_{idx} = {_py_str(stype)}")
         lines.append(f"    action_show_{idx} = action_type_{idx}")
         lines.append(f"    if action_type_{idx} in ['input','wait','assert','hover','select_option','set_checked','press_key','scroll'] and step_value_{idx}:")
         lines.append(f"        action_show_{idx} = action_show_{idx} + f\"({{step_value_{idx}}})\"")
 
-        lines.append(f"    print(f\"\\n▶️  [Step {idx+1}] 🎯 元素：'{{selector_{idx}}}' (意图: {display_intent})，动作：{{action_show_{idx}}}\", flush=True)")
+        lines.append(f"    print(f\"\\n▶️  [Step {idx+1}] 🎯 元素：'{{selector_{idx}}}' (意图: '{{step_intent_display_{idx}}}')，动作：{{action_show_{idx}}}\", flush=True)")
         lines.append("    try:")
         lines.append("        current_page = driver.switch_to_latest_page()")
         if stype == "input":
@@ -862,14 +880,17 @@ def _build_python_script(case: Dict[str, Any]) -> str:
         elif stype == "assert":
             assert_type = step.get("assert_type") or "text"
             if assert_type == "text":
-                lines.append("        try:")
-                lines.append(f"            driver._get_locator(f'text=\"{{step_value_{idx}}}\"').wait_for(state='visible', timeout=3000)")
-                lines.append("        except Exception:")
-                lines.append(f"            assert step_value_{idx} in current_page.content(), f'断言失败: 页面不包含文本 \"{{step_value_{idx}}}\"'")
+                lines.append(f"        _assert_locator_{idx} = driver._get_locator(f'text=\"{{step_value_{idx}}}\"').first")
+                lines.append(f"        _assert_count_{idx} = _assert_locator_{idx}.count()")
+                lines.append(f"        if _assert_count_{idx} == 0:")
+                lines.append(f"            raise AssertionError(f'断言失败: 页面上不存在可见文本 \"{{step_value_{idx}}}\"')")
+                lines.append(f"        _assert_locator_{idx}.wait_for(state='visible', timeout=5000)")
             elif assert_type == "url":
                 lines.append(f"        assert step_value_{idx} in current_page.url, f'断言失败: URL 不包含 \"{{step_value_{idx}}}\"'")
             elif assert_type == "visible":
                 lines.append(f"        driver._get_locator(selector_{idx}).wait_for(state='visible', timeout=3000)")
+            else:
+                lines.append(f"        raise ValueError(f'不支持的断言类型: {{repr(assert_type)}}')")
         elif stype in ["hover", "select_option", "set_checked", "double_click", "right_click", "press_key", "scroll", "click"]:
             lines.append(f"        driver.perform_action(\"{stype}\", f\"SELECTOR:{{selector_{idx}}}\", step_value_{idx})")
         else:
@@ -881,7 +902,8 @@ def _build_python_script(case: Dict[str, Any]) -> str:
         lines.append("        if healer is None:")
         lines.append("            raise")
 
-        if stype == "assert" and step.get("assert_type") in ["text", "url"]:
+        if stype == "assert":
+            # 断言步骤永不进入自愈：直接 raise，保留失败信息
             lines.append("        raise")
             lines.append("")
             continue
@@ -1342,11 +1364,21 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if not _is_valid_token(token):
         await websocket.close(code=1008)
         return
+    # 记录可能存在的旧连接（不主动关闭，避免影响已移交的旧页面）
+    previous = active_sessions.get(session_id)
     await websocket.accept()
     active_sessions[session_id] = websocket
     try:
         run_meta = active_runs.get(session_id)
         if run_meta:
+            # 若运行已是终态（completed/failed/stopped/timeout），立即补发终态 status，
+            # 否则前端断线重连后将无法感知运行已结束。
+            current_status = run_meta.get("status")
+            if current_status in RUN_TERMINAL_STATUSES:
+                try:
+                    await websocket.send_json({"type": "status", "status": current_status})
+                except Exception:
+                    pass
             for log in run_meta.get("logs", []):
                 try:
                     await websocket.send_json({"type": "log", "message": log})
@@ -1367,7 +1399,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # 接收从底层 driver 发过来的截图或结构化日志 (MVP 中，可以开放一个内部 HTTP 接口供底层调)
             data = await websocket.receive_text()
     except WebSocketDisconnect:
-        if session_id in active_sessions:
+        # 仅当当前注册的就是本连接时才清理，避免旧连接断开误删新连接
+        if active_sessions.get(session_id) is websocket:
             del active_sessions[session_id]
 
 # 提供一个内部接口供底层 Python Agent 发送截图

@@ -56,10 +56,12 @@ OPENAI_MODEL_NAME=gpt-4o-mini
 
 `tests/` 是运行时数据目录，默认被 `.gitignore` 忽略：
 
-- `tests/tester.db`：SQLite 数据库，存储 cases、runs、suites 等元数据
+- `tests/tester.db`：SQLite 数据库，存储业务主数据（cases / suites / environments）
 - `tests/recorded_cases/`：用例备份，包含 `.bak`
-- `tests/run_history/`：单用例运行产物，包括 meta、截图、token
+- `tests/run_history/<run_id>/meta.json`：单用例运行元数据（状态、日志、截图、token 等以文件系统为准）
 - `tests/suite_history/`：套件运行产物，包括 meta 和 storage_state
+
+> 说明：`database.py` 中定义的 `RunModel` / `SuiteRunModel` 为预留表结构（未启用）。运行记录以文件系统为准（`tests/run_history/<run_id>/meta.json`），SQLite 仅存业务主数据。
 
 ## Chrome 插件
 
@@ -82,5 +84,16 @@ OPENAI_MODEL_NAME=gpt-4o-mini
 5. 通过 API 触发套件运行
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/suites/<suite_id>/run"
+curl -X POST "http://127.0.0.1:8000/api/suites/<suite_id>/run" \
+  -H "Authorization: Bearer <token>"
 ```
+
+## 已知限制与信任边界
+
+本平台为单团队内部测试工具，使用前需了解以下信任边界：
+
+1. **内部工具信任模型**：登录用户可在本机执行服务端动态生成的 Python 测试脚本，等价于可信内网执行环境；不要在公网或不可信网络直接暴露后端。
+2. **recorder 接口默认未鉴权**：`POST /api/recorder/cases` 不走登录 token，仅靠可选的 `AI_TESTER_RECORDER_TOKEN` 校验，默认不设置即放开。生产/共享环境请务必配置该 token。
+3. **断言为语义可见断言**：文本/可见断言走 Playwright `.first + count + wait_for(visible)`，断言失败永不进入自愈，避免“断言被绕过”。
+4. **生成脚本由服务端编译执行**：自然语言/AI 修复建议生成的脚本会在服务端编译并执行，输入数据以 Python 字面量（`repr`）安全序列化后内嵌。
+5. **多 WS 连接策略**：同一 `session_id` 的新 WS 连接会覆盖旧注册但不主动关闭旧连接；运行结束时新连接会立即收到终态 `status` 消息。

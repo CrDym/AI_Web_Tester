@@ -37,6 +37,16 @@ AI Web Tester shifts test authoring from “finding elements” to “expressing
 - Suite execution with setup case support and shared login state.
 - Chrome recording extension for syncing recorded steps to the console.
 - Data-driven cases with `variables`, `dataset`, and built-in variables such as `${today_ymd}`.
+- Cancellable queueing: runs queue in `pending` state and can be cancelled while still in the queue, releasing the slot.
+- Trustworthy assertions: assertions are semantic visible-assertions (`.first + count + wait_for(visible)`) and never enter self-healing, so assertions cannot be bypassed; input data is safely embedded into generated scripts as Python literals via `repr`.
+
+## Scope & Trust Model
+
+This tool is intended for **single-team internal use**. Understand the trust boundary before deployment:
+
+- A logged-in user can execute server-generated Python test scripts on the host, equivalent to a trusted intranet execution environment. Do not expose the backend directly to the public internet.
+- The Chrome recorder sync endpoint (`POST /api/recorder/cases`) is not authenticated by default; it is only guarded by an optional `AI_TESTER_RECORDER_TOKEN`. Always set that token in shared/production environments.
+- Scripts generated from natural language or AI fix suggestions are compiled and executed server-side, with inputs safely serialized via `repr`.
 
 ## Quick Start
 
@@ -111,6 +121,8 @@ npm run e2e:smoke
 ```
 
 `npm run e2e:smoke` starts isolated temporary frontend/backend services, a temporary database, and a temporary prompts directory. It covers setup/login, settings save, case creation/save, and suite creation/maintenance.
+
+The backend currently has 30 tests (`test_web_server_api.py` 22 / `test_runner.py` 5 / `test_suite_runner.py` 3), covering key regression paths such as generated-script injection, assertion/self-heal isolation, queue cancellation, run timeout and stopped-terminal-state preservation, backup restore integrity, and unauthenticated request rejection.
 
 ## Acknowledgments
 

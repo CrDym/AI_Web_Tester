@@ -142,7 +142,7 @@ def create_cases_router(deps: CasesRouteDeps) -> APIRouter:
                 next_doc["start_url"] = data.get("start_url")
             deps.validate_case_placeholders(next_doc)
 
-            deps.write_case_backup_file(case_id, deps.case_doc_from_model(case))
+            backup_path = deps.write_case_backup_file(case_id, deps.case_doc_from_model(case))
             if "steps" in data:
                 case.steps = json.dumps(data.get("steps", []))
             if "tags" in data:
@@ -159,7 +159,7 @@ def create_cases_router(deps: CasesRouteDeps) -> APIRouter:
                 case.group_name = str(data.get("group_name") or "").strip()
             case.updated_at = int(time.time())
             db.commit()
-            return JSONResponse({"status": "success", "message": "Case updated"})
+            return JSONResponse({"status": "success", "message": "Case updated", "backup_saved": bool(backup_path)})
         finally:
             db.close()
 
@@ -265,6 +265,20 @@ def create_cases_router(deps: CasesRouteDeps) -> APIRouter:
                     case.dataset = json.dumps(dataset_val)
             if "type" in backup_doc and backup_doc.get("type"):
                 case.type = backup_doc.get("type")
+            # 恢复完整性：补回 variables 与 group_name，避免恢复后丢失这两项
+            if "variables" in backup_doc:
+                variables_val = backup_doc.get("variables") or {}
+                if isinstance(variables_val, str):
+                    try:
+                        variables_val = json.loads(variables_val)
+                    except Exception:
+                        variables_val = {}
+                if isinstance(variables_val, dict):
+                    case.variables = json.dumps(variables_val, ensure_ascii=False)
+            if "group_name" in backup_doc:
+                group_name_val = backup_doc.get("group_name")
+                if isinstance(group_name_val, str):
+                    case.group_name = group_name_val
 
             case.updated_at = int(time.time())
             db.commit()
