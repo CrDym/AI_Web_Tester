@@ -1433,6 +1433,11 @@ function App() {
   const mainTitle = mainCaseContext?.name || (selectedRun ? `运行记录 ${selectedRun.id}` : '未选择用例');
   const mainCaseId = mainCaseContext?.id || selectedRun?.case_id || '';
 
+  // 手改脚本提示：custom 状态即提示（运行将使用手改脚本；若用例有未保存修改，脚本不会自动同步）
+  const scriptOutOfSync = scriptSource === 'custom';
+  // 队列统计：从全量运行记录里数 pending（排队中，可取消）
+  const pendingCount = allRuns.filter((r) => r.status === 'pending').length;
+
   return (
     <div className="flex h-screen solo-app-surface dark:bg-black text-zinc-900 dark:text-zinc-100 antialiased overflow-hidden">
       {!authUser && (
@@ -1600,22 +1605,47 @@ function App() {
                   </button>
                 )}
                 {!(isRunning || selectedRun?.status === 'running') ? (
-                  <button 
+                  <button
                     onClick={handleRun}
                     className="flex items-center gap-2 bg-[#13966f] hover:bg-[#087653] text-white px-5 py-2 rounded-xl text-sm font-semibold transition-colors shadow-[0_10px_24px_rgba(19,150,111,0.18)]"
                   >
                     <Play className="w-4 h-4 fill-current" /> 运行测试
                   </button>
                 ) : (
-                  <button 
+                  <button
                     onClick={handleStop}
                     className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-zinc-100 px-4 py-1.5 rounded-xl text-sm font-medium transition-colors shadow-md shadow-black/20 animate-pulse"
                   >
                     <XCircle className="w-4 h-4" /> 停止运行
                   </button>
                 )}
+                {pendingCount > 0 && !isReplayMode && (
+                  <button
+                    onClick={() => { setSidebarNav('runs'); }}
+                    title="有待取消的排队任务，点击进入运行历史查看"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/15 transition-colors"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    排队中 {pendingCount}
+                  </button>
+                )}
               </div>
             </div>
+
+            {/* Custom script out-of-sync banner */}
+            {!isReplayMode && scriptOutOfSync && (
+              <div className="mx-4 mt-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between shrink-0">
+                <span>
+                  ⚠ 当前为<b>手动修改的脚本</b>——运行/回放使用此版本；用例步骤的改动不会自动同步进来。可在「脚本」弹窗中「恢复自动生成」。
+                </span>
+                <button
+                  onClick={() => setScriptModalOpen(true)}
+                  className="ml-3 px-2 py-1 rounded-lg border border-amber-300 dark:border-amber-500/40 hover:bg-amber-100 dark:hover:bg-amber-500/15 transition-colors shrink-0"
+                >
+                  查看脚本
+                </button>
+              </div>
+            )}
 
             {/* Content Area - Split View */}
             <div className="flex-1 flex overflow-hidden min-h-0">
