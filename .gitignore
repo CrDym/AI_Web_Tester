@@ -68,3 +68,6 @@ tools/screenshot_*.py
 tools/validate_*.py
 web_server/*.db
 *.local.log
+
+# 内部进度账本（AI 协作用，不入库）
+PROGRESS.md
