@@ -70,18 +70,18 @@ def _stop(proc: subprocess.Popen) -> None:
 
 def _setup_or_login(page: Page, username: str, password: str) -> None:
     page.goto("/", wait_until="domcontentloaded")
-    expect(page.get_by_role("heading", name="SOLO 测试控制台")).to_be_visible(timeout=10000)
-    page.get_by_role("button", name="初始化").click()
+    expect(page.get_by_role("button", name="注册")).to_be_visible(timeout=10000)
+    page.get_by_role("button", name="注册").click()
     page.get_by_placeholder("用户名").fill(username)
     page.get_by_placeholder("密码").fill(password)
-    page.get_by_role("button", name="初始化").last.click()
+    page.get_by_role("button", name="创建账号并进入 SOLO").click()
 
-    expect(page.get_by_role("heading", name="SOLO 测试", exact=True)).to_be_visible(timeout=10000)
+    expect(page.get_by_role("heading", name="SOLO 测试工作台")).to_be_visible(timeout=10000)
     expect(page.get_by_role("button", name="设置")).to_be_visible(timeout=10000)
 
 
 def _create_case(page: Page, name: str) -> None:
-    page.get_by_role("button", name="NL2Case").click()
+    page.get_by_role("button", name="让 SOLO 生成用例").click()
     expect(page.get_by_role("heading", name="自然语言生成用例 (NL2Case)")).to_be_visible(timeout=10000)
     page.get_by_placeholder("例如：登录并验证欢迎提示").fill(name)
     page.get_by_placeholder("例如：https://example.com/login").fill("https://example.test/login")
@@ -107,9 +107,9 @@ def _create_case(page: Page, name: str) -> None:
     page.get_by_title("刷新用例").click()
     page.get_by_text(name, exact=True).click()
     expect(page.get_by_text(f"CaseID: {res.json()['id']}")).to_be_visible(timeout=10000)
-    expect(page.get_by_placeholder("selector（Playwright 支持）").first).to_have_value("#login")
+    expect(page.get_by_placeholder("可选：Playwright selector").first).to_have_value("#login")
     page.get_by_role("button", name="新增步骤").click()
-    expect(page.get_by_text("步骤 2")).to_be_visible(timeout=10000)
+    expect(page.get_by_text("STEP 2")).to_be_visible(timeout=10000)
     page.get_by_role("button", name="保存", exact=True).click()
     expect(page.get_by_role("button", name="保存", exact=True)).to_be_disabled(timeout=10000)
 
@@ -178,7 +178,7 @@ def run() -> int:
                 page.get_by_role("button", name="设置", exact=True).click()
                 expect(page.get_by_text("OPENAI_API_BASE")).to_be_visible(timeout=10000)
                 page.get_by_role("button", name="保存设置").click()
-                expect(page.get_by_role("heading", name="SOLO 测试", exact=True)).to_be_visible(timeout=10000)
+                expect(page.get_by_role("heading", name="SOLO 测试工作台")).to_be_visible(timeout=10000)
                 case_name = "E2E 保存用例"
                 suite_name = "E2E 回归套件"
                 _create_case(page, case_name)

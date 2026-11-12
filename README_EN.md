@@ -66,9 +66,9 @@ cp .env.example .env
 ```
 
 ```env
-OPENAI_API_BASE=https://models.inference.ai.azure.com
-OPENAI_API_KEY=github_pat_xxxxxx
-OPENAI_MODEL_NAME=gpt-4o
+OPENAI_API_BASE=<Your OpenAI-compatible endpoint>
+OPENAI_API_KEY=<Your API key>
+OPENAI_MODEL_NAME=<Model name, e.g. gpt-4o / gpt-6.1-sol / glm-5.3 — any compatible model>
 ```
 
 You can also configure these values from the Web Console Settings page. The backend writes them to `.env`.

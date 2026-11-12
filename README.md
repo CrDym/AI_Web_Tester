@@ -66,9 +66,9 @@ cp .env.example .env
 ```
 
 ```env
-OPENAI_API_BASE=https://models.inference.ai.azure.com
-OPENAI_API_KEY=github_pat_xxxxxx
-OPENAI_MODEL_NAME=gpt-4o
+OPENAI_API_BASE=<你的 OpenAI 兼容接口地址>
+OPENAI_API_KEY=<你的 API Key>
+OPENAI_MODEL_NAME=<模型名，例如 gpt-4o / gpt-6.1-sol / glm-5.3 等任意兼容模型>
 ```
 
 也可以在 Web 控制台的“设置”里配置，后端会写入 `.env`。
