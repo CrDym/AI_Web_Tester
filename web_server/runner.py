@@ -151,6 +151,8 @@ def _load_case(deps: RunnerDeps, name: str) -> Optional[Dict[str, Any]]:
             "variables": json.loads(case_model.variables) if getattr(case_model, "variables", None) else {},
             "dataset": json.loads(case_model.dataset) if getattr(case_model, "dataset", None) else [],
             "type": case_model.type,
+            # 用户手改的脚本覆盖（None 时回退实时生成）
+            "custom_script": getattr(case_model, "custom_script", None) or None,
         }
     finally:
         db.close()
@@ -200,7 +202,8 @@ async def start_run(
         case_id = case["id"]
         _apply_env_override(case, _find_env_base_url(deps.envs_file, env_id))
         deps.validate_case_placeholders(case)
-        script_content = deps.build_python_script(case)
+        # custom_script 优先：用户手改的脚本直接编译入库；否则实时生成
+        script_content = (case.get("custom_script") or "").strip() or deps.build_python_script(case)
         os.makedirs(deps.scripts_dir, exist_ok=True)
         temp_file = tempfile.NamedTemporaryFile(
             dir=deps.scripts_dir,

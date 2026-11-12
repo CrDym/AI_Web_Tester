@@ -64,6 +64,7 @@ class CaseModel(Base):
     tags = Column(Text) # JSON list
     dataset = Column(Text) # JSON list
     variables = Column(Text) # JSON dict
+    custom_script = Column(Text)  # 用户手改的生成脚本覆盖（None = 自动生成）
     created_at = Column(Integer)
     updated_at = Column(Integer)
 

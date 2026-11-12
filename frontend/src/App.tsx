@@ -4,7 +4,6 @@ import { apiClient } from './api/client';
 import AIFixSuggestionPanel from './components/AIFixSuggestionPanel';
 import AuthGate from './components/AuthGate';
 import CaseStepEditor from './components/CaseStepEditor';
-import CodeBlock from './components/CodeBlock';
 import DatasetEditor from './components/DatasetEditor';
 import CaseSidebar from './components/CaseSidebar';
 import ConfirmModal from './components/ConfirmModal';
@@ -23,6 +22,7 @@ import RunLogPanel from './components/RunLogPanel';
 import RunScreenshotPanel from './components/RunScreenshotPanel';
 import RunTokenPanel from './components/RunTokenPanel';
 import SettingsModal from './components/SettingsModal';
+import ScriptModal from './components/ScriptModal';
 import SuiteEditorPanel from './components/SuiteEditorPanel';
 import SuiteRunDetailPanel from './components/SuiteRunDetailPanel';
 import type { CaseDoc, NaturalLanguageImportItem, RunDetail, SuiteDoc, SuiteRunDetail, SuiteRunItem, SuiteRunSummary, SuiteSummary, TestCase } from './types';
@@ -106,6 +106,11 @@ function App() {
   const [suiteAddCaseId, setSuiteAddCaseId] = useState<string>('');
   const [logs, setLogs] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+
+  const [scriptModalOpen, setScriptModalOpen] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [scriptSaving, setScriptSaving] = useState(false);
+  const [scriptSaveError, setScriptSaveError] = useState<string | null>(null);
   
   const [suiteLogs, setSuiteLogs] = useState<string[]>([]);
   const [suiteScreenshot, setSuiteScreenshot] = useState<string | null>(null);
@@ -1642,8 +1647,8 @@ function App() {
                           变量/数据
                         </button>
                         <button
-                          onClick={() => setLeftTab('python')}
-                          className={`px-2 py-1 rounded-xl border text-xs transition-colors ${leftTab === 'python' ? 'bg-white border-zinc-200 text-zinc-900 shadow-sm' : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-900'}`}
+                          onClick={() => setScriptModalOpen(true)}
+                          className={`px-2 py-1 rounded-xl border text-xs transition-colors ${scriptModalOpen ? 'bg-white border-zinc-200 text-zinc-900 shadow-sm' : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-900'}`}
                         >
                           脚本
                         </button>
@@ -1694,11 +1699,14 @@ function App() {
                       )
                     ) : (
                       leftTab === 'python' ? (
-                        <CodeBlock
-                          code={scriptContent}
-                          language="python"
-                          className="custom-scrollbar text-[13px] font-mono"
-                        />
+                        <div className="flex items-center justify-center py-12">
+                          <button
+                            onClick={() => setScriptModalOpen(true)}
+                            className="px-4 py-2.5 rounded-xl bg-[#13966f] text-white text-sm font-medium hover:bg-[#0f7a5b] transition-colors shadow-sm"
+                          >
+                            打开脚本弹窗查看完整代码
+                          </button>
+                        </div>
                       ) : leftTab === 'dataset' ? (
                         !caseDoc ? (
                           <div className="text-zinc-600 italic">加载中...</div>
@@ -1808,6 +1816,32 @@ function App() {
           100% { transform: translateY(800px); }
         }
       `}} />
+
+      {/* Script Modal */}
+      <ScriptModal
+        open={scriptModalOpen}
+        caseName={caseDoc?.name || selectedCase?.name || ''}
+        scriptContent={scriptContent}
+        loadingScript={false}
+        onClose={() => setScriptModalOpen(false)}
+        onSave={caseDoc ? (content) => {
+          setScriptSaving(true);
+          setScriptSaveError(null);
+          apiClient.put(`/api/cases/${caseDoc.id}/script`, { content })
+            .then(() => setScriptContent(content))
+            .catch((e) => setScriptSaveError(String(e?.response?.data?.error || e.message || '保存失败')))
+            .finally(() => setScriptSaving(false));
+        } : undefined}
+        saving={scriptSaving}
+        saveError={scriptSaveError}
+        onCopy={(text) => {
+          navigator.clipboard.writeText(text).then(() => {
+            setCopiedScript(true);
+            setTimeout(() => setCopiedScript(false), 1500);
+          }).catch(() => {});
+        }}
+        copied={copiedScript}
+      />
 
       {/* Settings Modal */}
       {showSettings && (

@@ -367,7 +367,47 @@ def create_cases_router(deps: CasesRouteDeps) -> APIRouter:
                 "dataset": json.loads(case.dataset) if getattr(case, "dataset", None) else [],
                 "type": case.type,
             }
-            return JSONResponse({"content": deps.build_python_script(case_doc)})
+            # 用户手改的脚本覆盖优先（存在 custom 列时），否则实时生成
+            custom = getattr(case, "custom_script", None)
+            if custom:
+                return JSONResponse({"content": custom, "source": "custom"})
+            return JSONResponse({"content": deps.build_python_script(case_doc), "source": "generated"})
+        finally:
+            db.close()
+
+    @router.put("/api/cases/{case_id}/script")
+    async def save_case_script(case_id: str, request: Request):
+        data = await request.json()
+        content = data.get("content")
+        if not isinstance(content, str) or not content.strip():
+            return JSONResponse({"error": "Missing content"}, status_code=400)
+        if len(content) > 200_000:
+            return JSONResponse({"error": "Script too large"}, status_code=400)
+        db = deps.session_factory()
+        try:
+            case = db.query(deps.case_model).filter_by(id=case_id).first()
+            if not case:
+                return JSONResponse({"error": "Case not found"}, status_code=404)
+            setattr(case, "custom_script", content)
+            case.updated_at = int(time.time())
+            db.commit()
+            return JSONResponse({"status": "success", "source": "custom"})
+        finally:
+            db.close()
+
+    @router.delete("/api/cases/{case_id}/script")
+    async def reset_case_script(case_id: str):
+        """恢复为自动生成脚本（清除手改覆盖）"""
+        db = deps.session_factory()
+        try:
+            case = db.query(deps.case_model).filter_by(id=case_id).first()
+            if not case:
+                return JSONResponse({"error": "Case not found"}, status_code=404)
+            if hasattr(case, "custom_script"):
+                setattr(case, "custom_script", None)
+                case.updated_at = int(time.time())
+                db.commit()
+            return JSONResponse({"status": "success", "source": "generated"})
         finally:
             db.close()
 
