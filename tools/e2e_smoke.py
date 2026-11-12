@@ -128,6 +128,44 @@ def _create_suite(page: Page, suite_name: str, case_name: str) -> None:
     expect(page.get_by_text("已保存")).to_be_visible(timeout=10000)
 
 
+def _run_case_to_completion(page: Page, token: str, case_id: str, case_name: str) -> str:
+    """通过 API 触发一条真实运行（无 API key，纯本地断言脚本），轮询到终态。
+
+    用例：START_URL 指向本地后端 /health（404 但可达），断言 URL 包含该路径。
+    无需浏览器外网、无需 LLM。返回最终 status。
+    """
+    res = page.request.post(
+        f"/api/run/{case_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={},
+    )
+    assert res.ok, res.text()
+    run_id = res.json()["run_id"]
+
+    # 轮询运行状态直到终态（90s 覆盖 30s 超时余量）
+    deadline = time.time() + 90
+    final_status = ""
+    while time.time() < deadline:
+        detail = page.request.get(
+            f"/api/runs/{run_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail.ok, detail.text()
+        meta = detail.json()
+        status = meta.get("status")
+        if status in ("completed", "failed", "stopped", "timeout"):
+            final_status = status
+            break
+        time.sleep(1.5)
+    else:
+        raise AssertionError(f"Run {run_id} did not reach terminal state in 90s")
+
+    # 终态应为 completed：断言步骤简单且必然通过
+    # （URL contains 本地后端地址；assert url 包含后端 host 部分）
+    assert final_status == "completed", f"Expected completed, got {final_status}: logs={meta.get('logs', [])[-5:]}"
+    return run_id
+
+
 def run() -> int:
     backend_port = _free_port()
     frontend_port = _free_port()
@@ -183,6 +221,30 @@ def run() -> int:
                 suite_name = "E2E 回归套件"
                 _create_case(page, case_name)
                 _create_suite(page, suite_name, case_name)
+
+                # —— 新增：真实运行一条用例到终态（无 API key 模式）——
+                # 用例：直接通过 API 创建（步骤=断言 URL 包含后端 host；必然通过）
+                token = page.evaluate("localStorage.getItem('auth_token')")
+                backend_base = f"http://127.0.0.1:{backend_port}"
+                run_case_payload = {
+                    "name": "E2E smoke 运行链路",
+                    "start_url": backend_base,
+                    "steps": [
+                        {"type": "wait", "value": "500", "intent": "等待加载"},
+                        {"type": "assert", "assert_type": "url", "value": backend_base, "intent": "断言 URL 与后端一致"},
+                    ],
+                    "tags": ["e2e"],
+                    "variables": {},
+                    "dataset": [],
+                }
+                create_res = page.request.post(
+                    "/api/cases",
+                    headers={"Authorization": f"Bearer {token}"},
+                    data=run_case_payload,
+                )
+                assert create_res.ok, create_res.text()
+                run_case_id = create_res.json()["id"]
+                _run_case_to_completion(page, token, run_case_id, run_case_payload["name"])
                 browser.close()
             print(f"E2E smoke passed: frontend=http://127.0.0.1:{frontend_port} backend=http://127.0.0.1:{backend_port}")
             return 0
