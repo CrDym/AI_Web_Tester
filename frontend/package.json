@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "tsc -p tsconfig.test.json && node node_modules/.tmp/tests/utils/__tests__/formatters.test.js && node node_modules/.tmp/tests/utils/__tests__/healApproval.test.js && node node_modules/.tmp/tests/utils/__tests__/runUi.test.js",
+    "test": "tsc -p tsconfig.test.json && node node_modules/.tmp/tests/utils/formatters.js && node node_modules/.tmp/tests/utils/healApproval.js && node node_modules/.tmp/tests/utils/runUi.js",
     "e2e:smoke": "../venv/bin/python ../tools/e2e_smoke.py",
     "lint": "eslint .",
     "preview": "vite preview"
