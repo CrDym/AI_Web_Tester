@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2, PencilLine, RefreshCw, Save, XCircle } from 'lucide-react';
+import { Loader2, PencilLine, RefreshCw, RotateCw, Save, XCircle } from 'lucide-react';
 import CodeBlock from './CodeBlock';
 
 type Props = {
@@ -7,6 +7,7 @@ type Props = {
   caseName: string;
   scriptContent: string;
   loadingScript: boolean;
+  source?: 'custom' | 'generated' | null;
   onClose: () => void;
   onRegenerate?: () => void;
   onCopy: (text: string) => void;
@@ -14,6 +15,8 @@ type Props = {
   onSave?: (content: string) => void;
   saving?: boolean;
   saveError?: string | null;
+  onResetToGenerated?: () => void;
+  resetting?: boolean;
 };
 
 /** 生成脚本大弹窗：占据全屏 90%，代码高亮，独立打开不受左栏宽度限制 */
@@ -22,6 +25,7 @@ export default function ScriptModal({
   caseName,
   scriptContent,
   loadingScript,
+  source,
   onClose,
   onRegenerate,
   onCopy,
@@ -29,6 +33,8 @@ export default function ScriptModal({
   onSave,
   saving,
   saveError,
+  onResetToGenerated,
+  resetting,
 }: Props) {
   const editable = !!onSave;
   const [draft, setDraft] = useState<string>('');
@@ -99,6 +105,16 @@ export default function ScriptModal({
                 编辑
               </button>
             )}
+            {source === 'custom' && onResetToGenerated && !editing && (
+              <button
+                onClick={onResetToGenerated}
+                disabled={resetting || saving}
+                className="px-2.5 py-1.5 rounded-xl border border-violet-300 dark:border-violet-500/40 text-xs text-violet-600 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {resetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
+                恢复自动生成
+              </button>
+            )}
             {onRegenerate && (
               <button
                 onClick={onRegenerate}
@@ -161,7 +177,9 @@ export default function ScriptModal({
                 ? '编辑中 — 修改后点击「保存脚本」写回并重新运行生效'
                 : dirty
                   ? '有未保存的修改'
-                  : '脚本由用例实时生成，运行时与本页内容保持一致'}
+                  : source === 'custom'
+                    ? '当前为手动修改的脚本（用例步骤改动不会自动同步，可「恢复自动生成」）'
+                    : '脚本由用例实时生成，运行时与本页内容保持一致'}
           </span>
           <span>Esc 关闭</span>
         </div>

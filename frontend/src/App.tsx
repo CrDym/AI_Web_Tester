@@ -111,6 +111,8 @@ function App() {
   const [copiedScript, setCopiedScript] = useState(false);
   const [scriptSaving, setScriptSaving] = useState(false);
   const [scriptSaveError, setScriptSaveError] = useState<string | null>(null);
+  const [scriptSource, setScriptSource] = useState<'custom' | 'generated' | null>(null);
+  const [scriptResetting, setScriptResetting] = useState(false);
   
   const [suiteLogs, setSuiteLogs] = useState<string[]>([]);
   const [suiteScreenshot, setSuiteScreenshot] = useState<string | null>(null);
@@ -768,6 +770,7 @@ function App() {
       if (seq !== caseLoadSeqRef.current) return;
       if (!res) return;
       setScriptContent(res.data.content || '');
+      setScriptSource(res.data.source === 'custom' ? 'custom' : 'generated');
       fetchRuns(selectedCase.id, selectedCase);
       if (pending) {
         loadRunDetail(pending.run_id).finally(() => setPendingRunToOpen(null));
@@ -934,6 +937,7 @@ function App() {
         setLastSaved(JSON.stringify(refreshed.data));
         const scriptRes = await apiClient.get(`/api/cases/${selectedCase.id}/script`);
         setScriptContent(scriptRes.data.content || '');
+        setScriptSource(scriptRes.data.source === 'custom' ? 'custom' : 'generated');
         setLogs((prev) => [...prev, '✅ 已自动保存未提交修改，开始运行']);
       } catch (e: any) {
         setLogs((prev) => [...prev, `❌ 运行前的自动保存失败，已中止运行: ${e.response?.data?.error || e.message}`]);
@@ -1016,6 +1020,7 @@ function App() {
         setLastSaved(JSON.stringify(refreshed.data));
         const scriptRes = await apiClient.get(`/api/cases/${selectedCase.id}/script`);
         setScriptContent(scriptRes.data.content || '');
+        setScriptSource(scriptRes.data.source === 'custom' ? 'custom' : 'generated');
       }
     } catch (e: any) {
       setLogs(prev => [...prev, `❌ 审核失败: ${e.response?.data?.error || e.message}`]);
@@ -1123,6 +1128,7 @@ function App() {
       setLastSaved(JSON.stringify(refreshed.data));
       const scriptRes = await apiClient.get(`/api/cases/${selectedCase.id}/script`);
       setScriptContent(scriptRes.data.content || '');
+        setScriptSource(scriptRes.data.source === 'custom' ? 'custom' : 'generated');
       let saveMsg = '✅ 用例已保存';
       if (putRes.data && putRes.data.backup_saved === false) {
         saveMsg += '（提示：本次备份写入失败，恢复功能可能回退到更早版本）';
@@ -1828,12 +1834,29 @@ function App() {
           setScriptSaving(true);
           setScriptSaveError(null);
           apiClient.put(`/api/cases/${caseDoc.id}/script`, { content })
-            .then(() => setScriptContent(content))
+            .then(() => {
+              setScriptContent(content);
+              setScriptSource('custom');
+            })
             .catch((e) => setScriptSaveError(String(e?.response?.data?.error || e.message || '保存失败')))
             .finally(() => setScriptSaving(false));
         } : undefined}
         saving={scriptSaving}
         saveError={scriptSaveError}
+        source={scriptSource}
+        resetting={scriptResetting}
+        onResetToGenerated={caseDoc && scriptSource === 'custom' ? () => {
+          setScriptResetting(true);
+          setScriptSaveError(null);
+          apiClient.delete(`/api/cases/${caseDoc.id}/script`)
+            .then(() => apiClient.get(`/api/cases/${caseDoc.id}/script`))
+            .then((r) => {
+              setScriptContent(r.data.content || '');
+              setScriptSource('generated');
+            })
+            .catch((e) => setScriptSaveError(String(e?.response?.data?.error || e.message || '恢复失败')))
+            .finally(() => setScriptResetting(false));
+        } : undefined}
         onCopy={(text) => {
           navigator.clipboard.writeText(text).then(() => {
             setCopiedScript(true);

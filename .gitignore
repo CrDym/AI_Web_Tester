@@ -58,3 +58,13 @@ frontend/dist/
 .pytest_cache/
 .DS_Store
 .trae/
+
+# Prompt 编辑器临时备份（带时间戳 .bak）
+src/ai_tester/prompts/*.bak
+
+# 调试/临时脚本
+tools/debug_page.py
+tools/screenshot_*.py
+tools/validate_*.py
+web_server/*.db
+*.local.log
