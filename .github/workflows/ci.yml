@@ -9,16 +9,18 @@ on:
 jobs:
   backend:
     name: Backend tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # python 3.8 在 ubuntu-latest(24.04) 不可用
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"  # 与本地 venv 保持一致，避免版本漂移
+          python-version: "3.8"
       - name: Install dependencies
         run: pip install -r web_server/requirements.txt
       - name: Install Playwright browser
-        run: playwright install chromium --with-deps
+        run: |
+          pip install playwright
+          playwright install chromium --with-deps
       - name: Run backend tests
         run: pytest web_server -q
 
@@ -29,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - name: Install dependencies
         run: npm ci
         working-directory: frontend
