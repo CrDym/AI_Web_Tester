@@ -17,7 +17,7 @@ export function useRunHistory(selectedCase: TestCase | null) {
     try {
       const res = await apiClient.get('/api/runs', { params: { include_all: true } });
       setAllRuns(res.data || []);
-    } catch (e) {
+    } catch {
       setAllRuns([]);
     } finally {
       setRunsLoading(false);
@@ -52,7 +52,7 @@ export function useRunHistory(selectedCase: TestCase | null) {
         [...prev, ...(nextRuns || [])].forEach((r) => map.set(r.id, r));
         return Array.from(map.values()).sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
       });
-    } catch (e) {
+    } catch {
       setRuns([]);
     } finally {
       setRunsLoading(false);

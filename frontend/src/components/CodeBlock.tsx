@@ -63,7 +63,7 @@ function tokenizeLine(line: string, inTriple: boolean): { tokens: Token[]; tripl
 
     // 行注释
     const hashIdx = indexOfUnquoted(rest, '#');
-    if (hashIdx === 0) {
+    if (hashIdx === 0 && !/^[a-zA-Z]/.test(rest.slice(1, 2))) {
       push(rest, 'text-zinc-400 dark:text-zinc-500 italic');
       break;
     }
@@ -118,7 +118,7 @@ function tokenizeLine(line: string, inTriple: boolean): { tokens: Token[]; tripl
     }
 
     // 操作符与标点
-    const opMatch = rest.match(/^[+\-*/%=<>!&|^~:;,.(){}\[\]]+/);
+    const opMatch = rest.match(/^[+\-*/%=<>!&|^~:;,()[\]{}]+/);
     if (opMatch) {
       push(opMatch[0], 'text-zinc-500 dark:text-zinc-400');
       i += opMatch[0].length;

@@ -53,3 +53,13 @@ export const getLogTone = (log: string) => {
   if (log.includes('🛑')) return { icon: '■', text: 'text-zinc-700 dark:text-zinc-300', iconWrap: 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700' };
   return { icon: '›', text: 'text-zinc-700 dark:text-zinc-300', iconWrap: 'bg-zinc-50 text-zinc-400 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-500 dark:border-zinc-800' };
 };
+
+/** 提取 catch 块里 axios/普通错误的用户可读信息 */
+export const getErrorMessage = (e: unknown, fallback = '操作失败'): string => {
+  if (e instanceof Error) {
+    // axios 错误带 response.data.error
+    const resp = (e as { response?: { data?: { error?: string } } }).response;
+    return resp?.data?.error || e.message || fallback;
+  }
+  return fallback;
+};

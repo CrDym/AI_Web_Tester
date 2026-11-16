@@ -55,8 +55,9 @@ export function useSettings(onLog: (message: string) => void) {
       }
       setShowSettings(false);
       onLog('✅ 配置已保存');
-    } catch (e: any) {
-      onLog(`❌ 配置保存失败: ${e.message}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '配置保存失败';
+      onLog(`❌ 配置保存失败: ${msg}`);
     } finally {
       setSavingSettings(false);
     }
@@ -78,8 +79,9 @@ export function useSettings(onLog: (message: string) => void) {
           message: tokenText ? `${res.data.message} · Token消耗 ${tokenText}` : res.data.message,
         });
       }
-    } catch (e: any) {
-      setSettingsTestResult({ ok: false, message: e.response?.data?.error || e.message });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '配置测试失败';
+      setSettingsTestResult({ ok: false, message: msg });
     } finally {
       setTestingSettings(false);
     }

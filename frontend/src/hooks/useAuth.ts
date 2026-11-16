@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '../api/client';
+import { isAxiosError } from 'axios';
 
 export type AuthMode = 'login' | 'setup';
 
@@ -25,7 +26,7 @@ export function useAuth(onUnauthorized?: () => void) {
       const t = localStorage.getItem('auth_token');
       if (t) {
         config.headers = config.headers || {};
-        (config.headers as any).Authorization = `Bearer ${t}`;
+        (config.headers as Record<string, string>).Authorization = `Bearer ${t}`;
       }
       return config;
     });
@@ -47,7 +48,7 @@ export function useAuth(onUnauthorized?: () => void) {
       try {
         if (interceptorRef.current?.req !== undefined) apiClient.interceptors.request.eject(interceptorRef.current.req);
         if (interceptorRef.current?.res !== undefined) apiClient.interceptors.response.eject(interceptorRef.current.res);
-      } catch {
+      } catch { /* 409 = 已初始化，转登录 */
       } finally {
         interceptorRef.current = null;
       }
@@ -86,8 +87,8 @@ export function useAuth(onUnauthorized?: () => void) {
       if (authMode === 'setup') {
         try {
           await apiClient.post('/api/auth/setup', { username, password });
-        } catch (e: any) {
-          if (e?.response?.status === 409) {
+        } catch (e) {
+          if (isAxiosError(e) && e.response?.status === 409) {
             setAuthMode('login');
           } else {
             throw e;
@@ -98,9 +99,9 @@ export function useAuth(onUnauthorized?: () => void) {
       setAuthToken(res.data?.token || '');
       setAuthUser(res.data?.username || username);
       setAuthReady(true);
-    } catch (e: any) {
-      const msg = e.response?.data?.error || e.message || '登录失败';
-      if (e?.response?.status === 409) {
+    } catch (e) {
+      const msg = isAxiosError(e) ? (e.response?.data as { error?: string })?.error || e.message : '登录失败';
+      if (isAxiosError(e) && e.response?.status === 409) {
         setAuthMode('login');
         setAuthError('系统已初始化，请直接登录。');
       } else {

@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { Play, FileJson, Terminal, XCircle, Plus, Save, History } from 'lucide-react';
+import { isAxiosError } from 'axios';
 import { apiClient } from './api/client';
 import AIFixSuggestionPanel from './components/AIFixSuggestionPanel';
 import AuthGate from './components/AuthGate';
@@ -29,6 +30,7 @@ import type { CaseDoc, NaturalLanguageImportItem, RunDetail, SuiteDoc, SuiteRunD
 import { formatRunTime, formatStatus, formatTokenUsage } from './utils/formatters';
 import { getLogKind } from './utils/runUi';
 import { useAuth } from './hooks/useAuth';
+import { getErrorMessage } from './utils/runUi';
 import { useCaseEditor } from './hooks/useCaseEditor';
 import { useCaseLibrary } from './hooks/useCaseLibrary';
 import { useGenerateCaseForm } from './hooks/useGenerateCaseForm';
@@ -335,7 +337,7 @@ function App() {
     try {
       const res = await apiClient.get('/api/suites');
       setSuites(res.data || []);
-    } catch (e) {
+    } catch {
       setSuites([]);
     }
   };
@@ -356,8 +358,8 @@ function App() {
       setSuiteDoc(res.data);
       setSuiteLastSaved(JSON.stringify(res.data));
       fetchSuiteRuns(res.data.id || suiteId);
-    } catch (e: any) {
-      alert('加载套件失败: ' + (e.response?.data?.error || e.message));
+    } catch (err) {
+      alert('加载套件失败: ' + (getErrorMessage(err)));
       setSuiteDoc(null);
       setSuiteLastSaved('');
       setSuiteRuns([]);
@@ -382,8 +384,8 @@ function App() {
       if (res.data?.id) {
         void loadSuite(res.data.id);
       }
-    } catch (e: any) {
-      alert('创建套件失败: ' + (e.response?.data?.error || e.message));
+    } catch (err) {
+      alert('创建套件失败: ' + (getErrorMessage(err)));
     } finally {
       setCreatingSuite(false);
     }
@@ -408,8 +410,8 @@ function App() {
         setSelectedSuiteRun(null);
       }
       fetchSuites();
-    } catch (e: any) {
-      alert('删除失败: ' + (e.response?.data?.error || e.message));
+    } catch (err) {
+      alert('删除失败: ' + (getErrorMessage(err)));
     }
   };
 
@@ -426,8 +428,8 @@ function App() {
       setSuiteDoc(refreshed.data);
       setSuiteLastSaved(JSON.stringify(refreshed.data));
       await fetchSuites();
-    } catch (e: any) {
-      alert('保存失败: ' + (e.response?.data?.error || e.message));
+    } catch (err) {
+      alert('保存失败: ' + (getErrorMessage(err)));
     }
   };
 
@@ -436,7 +438,7 @@ function App() {
     try {
       const res = await apiClient.get('/api/suite_runs', { params: { suite_id: suiteId } });
       setSuiteRuns(res.data || []);
-    } catch (e) {
+    } catch {
       setSuiteRuns([]);
     } finally {
       setSuiteRunsLoading(false);
@@ -452,9 +454,9 @@ function App() {
     try {
       const res = await apiClient.get(`/api/suite_runs/${suiteRunId}`);
       setSelectedSuiteRun(res.data);
-    } catch (e: any) {
+    } catch (err) {
       setSelectedSuiteRun(null);
-      alert('加载套件运行详情失败: ' + (e.response?.data?.error || e.message));
+      alert('加载套件运行详情失败: ' + (getErrorMessage(err)));
     }
   };
 
@@ -484,8 +486,8 @@ function App() {
         await fetchSuiteRuns(suiteDoc.id);
         await loadSuiteRunDetail(suiteRunId);
       }
-    } catch (e: any) {
-      alert('运行套件失败: ' + (e.response?.data?.error || e.message));
+    } catch (err) {
+      alert('运行套件失败: ' + (getErrorMessage(err)));
     }
   };
 
@@ -517,8 +519,8 @@ function App() {
       if (suiteDoc) {
         fetchSuiteRuns(suiteDoc.id);
       }
-    } catch (err: any) {
-      alert('删除失败: ' + (err.response?.data?.error || err.message));
+    } catch (err) {
+      alert('删除失败: ' + getErrorMessage(err, '删除失败'));
     }
   };
 
@@ -546,8 +548,8 @@ function App() {
       } else {
         fetchAllRuns();
       }
-    } catch (err: any) {
-      alert('删除失败: ' + (err.response?.data?.error || err.message));
+    } catch (err) {
+      alert('删除失败: ' + getErrorMessage(err, '删除失败'));
     }
   };
 
@@ -576,8 +578,8 @@ function App() {
         fetchAllRuns();
       }
       exitRunSelectMode();
-    } catch (err: any) {
-      const status = err?.response?.status;
+    } catch (err) {
+      const status = isAxiosError(err) ? err.response?.status : undefined;
       if (status === 401) {
         return;
       }
@@ -610,7 +612,7 @@ function App() {
         }
         return;
       }
-      alert('批量删除失败: ' + (err.response?.data?.error || err.message));
+      alert('批量删除失败: ' + getErrorMessage(err, '批量删除失败'));
     }
   };
 
@@ -742,8 +744,8 @@ function App() {
       }
 
       await loadLatestScreenshot(runId, detail.screenshots);
-    } catch (e: any) {
-      setLogs([`❌ 回放加载失败: ${e.message}`]);
+    } catch (err) {
+      setLogs([`❌ 回放加载失败: ${getErrorMessage(err)}`]);
       resetScreenshots();
       setSelectedRun(null);
       setRunDetailStandalone(false);
@@ -779,7 +781,7 @@ function App() {
       }
     }).catch(e => {
       if (seq !== caseLoadSeqRef.current) return;
-      setScriptContent('Failed to load case: ' + e.message);
+      setScriptContent('Failed to load case: ' + getErrorMessage(e));
     });
   }, [selectedCase]);
 
@@ -836,7 +838,7 @@ function App() {
   const collectPlaceholders = (doc: CaseDoc) => {
     const re = /\$\{([^}]+)\}/g;
     const locs: Array<{ key: string; where: string }> = [];
-    const scan = (val: any, where: string) => {
+    const scan = (val: unknown, where: string) => {
       if (typeof val !== 'string' || val.indexOf('${') === -1) return;
       for (const m of val.matchAll(re)) {
         const k = (m[1] || '').trim();
@@ -848,7 +850,7 @@ function App() {
       scan(s.selector, `steps[${idx}].selector`);
       scan(s.value, `steps[${idx}].value`);
       scan(s.intent, `steps[${idx}].intent`);
-      scan((s as any).url, `steps[${idx}].url`);
+      scan((s as { url?: unknown }).url, `steps[${idx}].url`);
     });
     return locs;
   };
@@ -939,9 +941,9 @@ function App() {
         setScriptContent(scriptRes.data.content || '');
         setScriptSource(scriptRes.data.source === 'custom' ? 'custom' : 'generated');
         setLogs((prev) => [...prev, '✅ 已自动保存未提交修改，开始运行']);
-      } catch (e: any) {
-        setLogs((prev) => [...prev, `❌ 运行前的自动保存失败，已中止运行: ${e.response?.data?.error || e.message}`]);
-        alert(`运行前的自动保存失败，已中止运行：${e.response?.data?.error || e.message}`);
+      } catch (err) {
+        setLogs((prev) => [...prev, `❌ 运行前的自动保存失败，已中止运行: ${getErrorMessage(err)}`]);
+        alert(`运行前的自动保存失败，已中止运行：${getErrorMessage(err)}`);
         return;
       } finally {
         setSaving(false);
@@ -989,8 +991,8 @@ function App() {
         setIsRunning(false);
       };
       
-    } catch (e: any) {
-      setLogs(prev => [...prev, `❌ 启动失败: ${e.message}`]);
+    } catch (err) {
+      setLogs(prev => [...prev, `❌ 启动失败: ${getErrorMessage(err)}`]);
       setIsRunning(false);
     }
   };
@@ -1022,8 +1024,8 @@ function App() {
         setScriptContent(scriptRes.data.content || '');
         setScriptSource(scriptRes.data.source === 'custom' ? 'custom' : 'generated');
       }
-    } catch (e: any) {
-      setLogs(prev => [...prev, `❌ 审核失败: ${e.response?.data?.error || e.message}`]);
+    } catch (err) {
+      setLogs(prev => [...prev, `❌ 审核失败: ${getErrorMessage(err)}`]);
     } finally {
       setApprovingHeals((prev) => ({ ...prev, [key]: false }));
     }
@@ -1105,9 +1107,9 @@ function App() {
       const refreshed = await apiClient.get(`/api/cases/${selectedCase.id}`);
       setCaseDoc(refreshed.data);
       setLastSaved(JSON.stringify(refreshed.data));
-    } catch (e: any) {
-      setLogs(prev => [...prev, `❌ 恢复备份失败: ${e.response?.data?.error || e.message}`]);
-      alert(`恢复备份失败: ${e.response?.data?.error || e.message}`);
+    } catch (err) {
+      setLogs(prev => [...prev, `❌ 恢复备份失败: ${getErrorMessage(err)}`]);
+      alert(`恢复备份失败: ${getErrorMessage(err)}`);
     }
   };
 
@@ -1134,8 +1136,8 @@ function App() {
         saveMsg += '（提示：本次备份写入失败，恢复功能可能回退到更早版本）';
       }
       setLogs((prev) => [...prev, saveMsg]);
-    } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ 保存失败: ${e.message}`]);
+    } catch (err) {
+      setLogs((prev) => [...prev, `❌ 保存失败: ${getErrorMessage(err)}`]);
     } finally {
       setSaving(false);
     }
@@ -1165,8 +1167,8 @@ function App() {
         fetchRuns(updated.id, updated);
       }
       setLogs((prev) => [...prev, `✅ 已重命名为 ${updated?.name || next}`]);
-    } catch (e: any) {
-      const msg = e.response?.data?.error || e.response?.data?.detail?.error || e.response?.data?.detail || e.message;
+    } catch (err) {
+      const msg = getErrorMessage(err);
       setLogs((prev) => [...prev, `❌ 重命名失败: ${msg}`]);
     }
   };
@@ -1196,8 +1198,8 @@ function App() {
       } else {
         setLogs((prev) => [...prev, `✅ 用例 ${target.name} 标签已更新为 [${newTags.join(', ')}]`]);
       }
-    } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ 标签更新失败: ${e.message}`]);
+    } catch (err) {
+      setLogs((prev) => [...prev, `❌ 标签更新失败: ${getErrorMessage(err)}`]);
     }
   };
 
@@ -1213,8 +1215,8 @@ function App() {
       } else {
         setLogs((prev) => [...prev, '❌ AI 修复建议生成失败']);
       }
-    } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ AI 修复建议生成失败: ${e.message}`]);
+    } catch (err) {
+      setLogs((prev) => [...prev, `❌ AI 修复建议生成失败: ${getErrorMessage(err)}`]);
     } finally {
       setFixSuggestLoading(false);
     }
@@ -1235,8 +1237,8 @@ function App() {
       await apiClient.put(`/api/cases/${selectedRun.case_id}`, fullCase);
       await fetchCases();
       setLogs((prev) => [...prev, '✅ 已应用 AI 修复建议到用例']);
-    } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ 应用 AI 修复建议失败: ${e.message}`]);
+    } catch (err) {
+      setLogs((prev) => [...prev, `❌ 应用 AI 修复建议失败: ${getErrorMessage(err)}`]);
     } finally {
       setApplyFixLoading(false);
     }
@@ -1263,8 +1265,8 @@ function App() {
       }
       resetCaseSelection();
       setLogs((prev) => [...prev, `✅ 已移动 ${caseIds.length} 个用例到 ${groupName || '未分组'}`]);
-    } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ 移动分组失败: ${e.response?.data?.error || e.message}`]);
+    } catch (err) {
+      setLogs((prev) => [...prev, `❌ 移动分组失败: ${getErrorMessage(err)}`]);
     }
   };
 
@@ -1287,8 +1289,8 @@ function App() {
         resetScreenshots();
       }
       setLogs((prev) => [...prev, '✅ 用例已删除']);
-    } catch (e: any) {
-      setLogs((prev) => [...prev, `❌ 删除失败: ${e.message}`]);
+    } catch (err) {
+      setLogs((prev) => [...prev, `❌ 删除失败: ${getErrorMessage(err)}`]);
     }
   };
 
@@ -1311,8 +1313,8 @@ function App() {
         const newCase = { id: res.data.id, name: generateForm.name, type: 'recorded' };
         setSelectedCase(newCase);
       }
-    } catch (e: any) {
-      alert('生成失败: ' + (e.response?.data?.error || e.message));
+    } catch (err) {
+      alert('生成失败: ' + (getErrorMessage(err)));
     } finally {
       setGenerating(false);
     }
@@ -1336,8 +1338,8 @@ function App() {
       setImportNlSelected(items.filter((item) => item.valid).map((item) => item.index));
       const tokenText = formatTokenUsage(res.data.token_usage);
       if (tokenText) setLogs((prev) => [...prev, `🧮 自然语言导入解析 Token消耗: ${tokenText}`]);
-    } catch (e: any) {
-      setImportNlError(e.response?.data?.error || e.message || '解析失败');
+    } catch (err) {
+      setImportNlError(getErrorMessage(err) || '解析失败');
     } finally {
       setImportNlLoading(false);
     }
@@ -1364,8 +1366,8 @@ function App() {
       }
       setShowImportNlModal(false);
       resetImportNl();
-    } catch (e: any) {
-      setImportNlError(e.response?.data?.error || e.message || '导入失败');
+    } catch (err) {
+      setImportNlError(getErrorMessage(err) || '导入失败');
     } finally {
       setImportNlLoading(false);
     }
@@ -1387,8 +1389,8 @@ function App() {
       try {
         await apiClient.post(`/api/runs/${selectedRunId}/stop`);
         setLogs(prev => [...prev, '🛑 已向后端发送终止指令，正在结束进程...']);
-      } catch (e: any) {
-        setLogs(prev => [...prev, `⚠️ 终止进程失败: ${e.response?.data?.error || e.message}`]);
+      } catch (err) {
+        setLogs(prev => [...prev, `⚠️ 终止进程失败: ${getErrorMessage(err)}`]);
       }
     }
     
@@ -1855,6 +1857,7 @@ function App() {
 
       {/* Script Modal */}
       <ScriptModal
+        key={caseDoc?.id || 'none'}
         open={scriptModalOpen}
         caseName={caseDoc?.name || selectedCase?.name || ''}
         scriptContent={scriptContent}
@@ -1868,7 +1871,7 @@ function App() {
               setScriptContent(content);
               setScriptSource('custom');
             })
-            .catch((e) => setScriptSaveError(String(e?.response?.data?.error || e.message || '保存失败')))
+            .catch((e) => setScriptSaveError(getErrorMessage(e, '保存失败')))
             .finally(() => setScriptSaving(false));
         } : undefined}
         saving={scriptSaving}
@@ -1884,7 +1887,7 @@ function App() {
               setScriptContent(r.data.content || '');
               setScriptSource('generated');
             })
-            .catch((e) => setScriptSaveError(String(e?.response?.data?.error || e.message || '恢复失败')))
+            .catch((e) => setScriptSaveError(getErrorMessage(e, '恢复失败')))
             .finally(() => setScriptResetting(false));
         } : undefined}
         onCopy={(text) => {
