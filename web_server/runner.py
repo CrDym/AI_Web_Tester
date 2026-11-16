@@ -53,6 +53,7 @@ class RunnerDeps:
     run_meta_path: Callable[[str], str]
     load_env: Callable[[], None]
     infer_failure_reason: Callable[[list], Dict[str, Any]]
+    ws_port: int = 8000
 
 
 def safe_run_id(run_id: str) -> str:
@@ -303,7 +304,7 @@ async def run_pytest_worker(
         env = os.environ.copy()
         env["PLAYWRIGHT_HEADLESS"] = "1"
         env["AI_TESTER_WS_SESSION"] = session_id
-        env["AI_TESTER_WS_PORT"] = "8000"
+        env["AI_TESTER_WS_PORT"] = str(getattr(deps, "ws_port", 8000))
         env["AI_TESTER_INTERNAL_TOKEN"] = deps.internal_token
         env["AI_TESTER_RUN_HISTORY_DIR"] = deps.run_dir(session_id)
         env["PYTHONPATH"] = os.pathsep.join(

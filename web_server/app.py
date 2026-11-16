@@ -1345,6 +1345,7 @@ def _runner_deps() -> RunnerDeps:
         run_meta_path=_run_meta_path,
         load_env=_load_env,
         infer_failure_reason=_infer_failure_reason,
+        ws_port=int(os.environ.get("AI_TESTER_WS_PORT", "8000")),
     )
 
 async def _start_run(name: str, env_id: Optional[str], wait_for_ws: bool, extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:

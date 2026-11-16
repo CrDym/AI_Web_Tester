@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import subprocess
@@ -166,6 +167,32 @@ def _run_case_to_completion(page: Page, token: str, case_id: str, case_name: str
     return run_id
 
 
+def _run_case_to_completion_expect_fail(page: Page, token: str, case_id: str, case_name: str) -> str:
+    """运行一条必然失败的用例（selector 指向不存在元素，无 API key 不自愈），等待 failed 终态。返回 run_id。"""
+    res = page.request.post(
+        f"/api/run/{case_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.ok, res.text()
+    run_id = res.json()["run_id"]
+
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        detail = page.request.get(
+            f"/api/runs/{run_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail.ok, detail.text()
+        meta = detail.json()
+        if meta.get("status") in ("completed", "failed", "stopped", "timeout"):
+            assert meta["status"] == "failed", (
+                f"Expected this intentionally-failing case to end failed, got {meta.get('status')}"
+            )
+            return run_id
+        time.sleep(1.5)
+    raise AssertionError(f"Run {run_id} did not reach terminal state in 90s")
+
+
 def run() -> int:
     backend_port = _free_port()
     frontend_port = _free_port()
@@ -181,7 +208,8 @@ def run() -> int:
         env.update(
             {
                 "AI_TESTER_DB_PATH": str(tmp_path / "tester.db"),
-                "AI_TESTER_RUN_TIMEOUT_SECONDS": "30",
+                "AI_TESTER_RUN_TIMEOUT_SECONDS": "90",
+                "AI_TESTER_WS_PORT": str(backend_port),
                 "OPENAI_API_KEY": "",
                 "VITE_API_TARGET": f"http://127.0.0.1:{backend_port}",
                 "VITE_WS_TARGET": f"ws://127.0.0.1:{backend_port}",
@@ -245,6 +273,36 @@ def run() -> int:
                 assert create_res.ok, create_res.text()
                 run_case_id = create_res.json()["id"]
                 _run_case_to_completion(page, token, run_case_id, run_case_payload["name"])
+
+                # —— 失败场景覆盖：必然失败的用例，验证 failure_reason 诊断正确 ——
+                fail_case_payload = {
+                    "name": "E2E smoke 失败诊断",
+                    "start_url": backend_base,
+                    "steps": [
+                        {"type": "click", "selector": "#definitely-not-exist-selector-e2e", "intent": "点击不存在的元素"},
+                    ],
+                    "tags": ["e2e"],
+                    "variables": {},
+                    "dataset": [],
+                }
+                fail_res = page.request.post(
+                    "/api/cases",
+                    headers={"Authorization": f"Bearer {token}"},
+                    data=fail_case_payload,
+                )
+                assert fail_res.ok, fail_res.text()
+                fail_run_id = _run_case_to_completion_expect_fail(
+                    page, token, fail_res.json()["id"], fail_case_payload["name"]
+                )
+                # 读取该 run 的 failure_reason，断言诊断类别正确
+                fail_meta = page.request.get(
+                    f"/api/runs/{fail_run_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                ).json()
+                reason = fail_meta.get("failure_reason") or {}
+                assert reason.get("category") == "selector_not_found", (
+                    f"Expected selector_not_found, got: {json.dumps(reason, ensure_ascii=False)}"
+                )
                 browser.close()
             print(f"E2E smoke passed: frontend=http://127.0.0.1:{frontend_port} backend=http://127.0.0.1:{backend_port}")
             return 0
