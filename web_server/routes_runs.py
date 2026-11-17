@@ -129,7 +129,13 @@ def create_runs_router(deps: RunsRouteDeps) -> APIRouter:
             if not os.path.isdir(run_path) or not os.path.exists(meta_path):
                 continue
             # 跳过运行中的任务（active 检查在 app 侧已有，但这里保守按目录 mtime）
-            entries.append((os.path.getmtime(run_path), name, run_path))
+            started_at = 0
+            try:
+                with open(os.path.join(run_path, "meta.json"), "r", encoding="utf-8") as f:
+                    started_at = int(json.load(f).get("started_at") or 0)
+            except Exception:
+                pass
+            entries.append((started_at, name, run_path))
         # 运行中的任务保护：从 runner 的 active_runs 不可直接依赖（跨层）——检查 meta.status
         keep_set = []
         trash_list = []

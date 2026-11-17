@@ -478,8 +478,7 @@ def test_get_cases_without_auth_returns_401(app_client):
 
 def test_cleanup_runs_keeps_recent_and_trashes_rest(app_client):
     app_module, client, headers = app_client
-    import time as _time
-    # 造 3 条终态运行目录：2 旧 1 新
+    # 造 3 条终态运行目录：2 旧 1 新（started_at 间隔拉大，避免文件系统 mtime 粒度影响）
     def make_run(rid, ts, status):
         d = Path(app_module.RUNS_DIR) / rid
         d.mkdir(parents=True, exist_ok=True)
@@ -487,10 +486,9 @@ def test_cleanup_runs_keeps_recent_and_trashes_rest(app_client):
             "id": rid, "case_id": "c1", "status": status,
             "started_at": ts, "ended_at": ts,
         }), encoding="utf-8")
-    import json  # noqa
-    base = int(_time.time())
-    make_run("run_old_1", base - 300, "completed")
-    make_run("run_old_2", base - 200, "completed")
+    base = 1_700_000_000
+    make_run("run_old_1", base - 3600, "completed")
+    make_run("run_old_2", base - 3500, "completed")
     # pending 运行不应参与清理
     make_run("run_pending1", base - 150, "running")
     make_run("run_new_1", base, "completed")
