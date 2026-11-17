@@ -1,7 +1,7 @@
 import { Loader2, RefreshCw, RotateCw, Save, Settings, Trash2, XCircle } from 'lucide-react';
-import type { EnvConfig } from '../types';
+import type { EnvConfig , SettingsTab} from '../types';
 
-type SettingsTab = 'env' | 'prompts';
+// SettingsTab moved to ../types
 
 interface SettingsModalProps {
   apiBase: string;
@@ -22,6 +22,11 @@ interface SettingsModalProps {
   onPromptsChange: (value: Record<string, string>) => void;
   onActivePromptFileChange: (value: string) => void;
   onSettingsTabChange: (value: SettingsTab) => void;
+  cleanupKeep: number;
+  onCleanupKeepChange: (v: number) => void;
+  onCleanupRuns: () => void;
+  cleanupRunning: boolean;
+  cleanupResult: { kept: number; trashed: string[] } | null;
   onClose: () => void;
   onSave: () => void;
   onTestConnection: () => void;
@@ -46,6 +51,11 @@ export default function SettingsModal({
   onPromptsChange,
   onActivePromptFileChange,
   onSettingsTabChange,
+  cleanupKeep,
+  onCleanupKeepChange,
+  onCleanupRuns,
+  cleanupRunning,
+  cleanupResult,
   onClose,
   onSave,
   onTestConnection,
@@ -183,6 +193,38 @@ export default function SettingsModal({
                 </div>
               </div>
             </>
+          ) : settingsTab === 'maintenance' ? (
+            <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 space-y-3">
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">运行历史清理</div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  保留最近 N 条运行记录（含日志与截图），更早的终态记录移入回收区（_deleted）。
+                  排队中/运行中的任务不受影响。
+                </p>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-zinc-600 dark:text-zinc-400 whitespace-nowrap">保留条数</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={cleanupKeep}
+                    onChange={(e) => onCleanupKeepChange(Math.max(1, Number(e.target.value) || 20))}
+                    className="w-24 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-[#13966f]/50 focus:ring-2 focus:ring-[#13966f]/15"
+                  />
+                  <button
+                    onClick={onCleanupRuns}
+                    disabled={cleanupRunning}
+                    className="px-3 py-1.5 rounded-xl bg-[#13966f] text-white text-xs font-semibold hover:bg-[#087653] transition-colors disabled:opacity-50"
+                  >
+                    {cleanupRunning ? '清理中...' : '执行清理'}
+                  </button>
+                </div>
+                {cleanupResult && (
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300">
+                    保留 {cleanupResult.kept} 条，已移入回收区 {cleanupResult.trashed.length} 条。
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="h-[620px] grid grid-cols-[220px_1fr] gap-4 pt-4 border-t border-zinc-200 dark:border-zinc-800 min-h-0">
               <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-2 overflow-auto custom-scrollbar">

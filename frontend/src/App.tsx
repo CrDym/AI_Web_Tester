@@ -115,6 +115,11 @@ function App() {
   const [scriptSaveError, setScriptSaveError] = useState<string | null>(null);
   const [scriptSource, setScriptSource] = useState<'custom' | 'generated' | null>(null);
   const [scriptResetting, setScriptResetting] = useState(false);
+
+  // 运行历史清理（设置·维护页）
+  const [cleanupKeep, setCleanupKeep] = useState(20);
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<{ kept: number; trashed: string[] } | null>(null);
   
   const [suiteLogs, setSuiteLogs] = useState<string[]>([]);
   const [suiteScreenshot, setSuiteScreenshot] = useState<string | null>(null);
@@ -1920,6 +1925,21 @@ function App() {
           onPromptsChange={setPrompts}
           onActivePromptFileChange={setActivePromptFile}
           onSettingsTabChange={setSettingsTab}
+          cleanupKeep={cleanupKeep}
+          onCleanupKeepChange={setCleanupKeep}
+          onCleanupRuns={() => {
+            setCleanupRunning(true);
+            setCleanupResult(null);
+            apiClient.post('/api/runs/cleanup', { keep: cleanupKeep })
+              .then((r) => {
+                setCleanupResult(r.data);
+                fetchAllRuns();
+              })
+              .catch(() => setCleanupResult({ kept: 0, trashed: [] }))
+              .finally(() => setCleanupRunning(false));
+          }}
+          cleanupRunning={cleanupRunning}
+          cleanupResult={cleanupResult}
           onClose={() => setShowSettings(false)}
           onSave={saveSettings}
           onTestConnection={testSettingsConnection}

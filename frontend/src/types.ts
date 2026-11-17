@@ -36,6 +36,8 @@ export interface TokenSummary {
   }>;
 }
 
+export type SettingsTab = 'env' | 'prompts' | 'maintenance';
+
 export interface RunSummary {
   id: string;
   case_id?: string;

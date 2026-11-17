@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { apiClient } from '../api/client';
-import type { EnvConfig } from '../types';
+import type { EnvConfig, SettingsTab } from '../types';
 import { formatTokenUsage } from '../utils/formatters';
 
 export function useSettings(onLog: (message: string) => void) {
@@ -11,7 +11,7 @@ export function useSettings(onLog: (message: string) => void) {
   const [modelName, setModelName] = useState('gpt-4o-mini');
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [activePromptFile, setActivePromptFile] = useState<string>('');
-  const [settingsTab, setSettingsTab] = useState<'env' | 'prompts'>('env');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('env');
   const [savingSettings, setSavingSettings] = useState(false);
   const [testingSettings, setTestingSettings] = useState(false);
   const [settingsTestResult, setSettingsTestResult] = useState<{ ok: boolean; message: string } | null>(null);

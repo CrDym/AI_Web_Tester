@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -473,3 +474,37 @@ def test_get_cases_without_auth_returns_401(app_client):
     _, client, _ = app_client
     res = client.get("/api/cases")
     assert res.status_code == 401
+
+
+def test_cleanup_runs_keeps_recent_and_trashes_rest(app_client):
+    app_module, client, headers = app_client
+    import time as _time
+    # 造 3 条终态运行目录：2 旧 1 新
+    def make_run(rid, ts, status):
+        d = Path(app_module.RUNS_DIR) / rid
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "meta.json").write_text(json.dumps({
+            "id": rid, "case_id": "c1", "status": status,
+            "started_at": ts, "ended_at": ts,
+        }), encoding="utf-8")
+    import json  # noqa
+    base = int(_time.time())
+    make_run("run_old_1", base - 300, "completed")
+    make_run("run_old_2", base - 200, "completed")
+    # pending 运行不应参与清理
+    make_run("run_pending1", base - 150, "running")
+    make_run("run_new_1", base, "completed")
+    res = client.post("/api/runs/cleanup", json={"keep": 1}, headers=headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert sorted(body["trashed"]) == ["run_old_1", "run_old_2"], body
+    # 保留的新目录仍在
+    assert (Path(app_module.RUNS_DIR) / "run_new_1").exists()
+    # pending 目录不被清理
+    assert (Path(app_module.RUNS_DIR) / "run_pending1").exists()
+    # 三方都在回收区
+    deleted = list((Path(app_module.RUNS_DIR) / "_deleted").iterdir())
+    assert len(deleted) == 2
+    # 无 token 不可用
+    res2 = client.post("/api/runs/cleanup", json={"keep": 5})
+    assert res2.status_code == 401

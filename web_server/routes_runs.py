@@ -21,7 +21,8 @@ class RunFixSuggestReq(BaseModel):
 
 
 class BatchDeleteRunsReq(BaseModel):
-    run_ids: List[str]
+    run_ids: List[str] = []
+    keep: int = 20
 
 
 @dataclass
@@ -112,7 +113,52 @@ def create_runs_router(deps: RunsRouteDeps) -> APIRouter:
         shutil.move(run_path, target)
         return True
 
+    @router.post("/api/runs/cleanup")
+    async def cleanup_runs(req: BatchDeleteRunsReq):
+        """按数量保留最近的运行（终态），其余软删除到 _deleted。"""
+        keep = max(1, int(req.keep or 20))
+        # 收集终态运行目录（非 _deleted），按目录 mtime 从新到旧排序
+        entries = []
+        root = deps.runs_dir()
+        deleted_dir = deleted_runs_dir()
+        for name in os.listdir(root):
+            if name == "_deleted":
+                continue
+            run_path = os.path.join(root, name)
+            meta_path = os.path.join(run_path, "meta.json")
+            if not os.path.isdir(run_path) or not os.path.exists(meta_path):
+                continue
+            # 跳过运行中的任务（active 检查在 app 侧已有，但这里保守按目录 mtime）
+            entries.append((os.path.getmtime(run_path), name, run_path))
+        # 运行中的任务保护：从 runner 的 active_runs 不可直接依赖（跨层）——检查 meta.status
+        keep_set = []
+        trash_list = []
+        for mtime, name, run_path in sorted(entries, key=lambda x: -x[0]):
+            try:
+                with open(os.path.join(run_path, "meta.json"), "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                if (meta.get("status") or "") not in ("completed", "failed", "stopped", "timeout"):
+                    # 非终态（running/pending）不参与清理也不计入 keep
+                    continue
+            except Exception:
+                pass
+            if len(keep_set) < keep:
+                keep_set.append(name)
+            else:
+                trash_list.append(name)
+        trashed = []
+        for name in trash_list:
+            run_path = os.path.join(root, name)
+            target = os.path.join(deleted_dir, f"{name}_{int(time.time())}")
+            try:
+                shutil.move(run_path, target)
+                trashed.append(name)
+            except Exception:
+                pass
+        return JSONResponse({"status": "success", "kept": len(keep_set), "trashed": trashed})
+
     @router.delete("/api/runs/{run_id}")
+
     async def delete_run(run_id: str):
         if not trash_run_dir(run_id):
             return JSONResponse({"error": "Run not found"}, status_code=404)
