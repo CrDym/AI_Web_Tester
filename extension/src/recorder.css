@@ -15,6 +15,7 @@
     color: #151816;
     user-select: none;
     overflow: hidden;
+    pointer-events: none; /* 根容器放行点击，仅 header 接收 */
 }
 
 #ai-tester-overlay.ai-dark {
@@ -29,6 +30,7 @@
 }
 
 #ai-tester-overlay .ai-header {
+    pointer-events: auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
