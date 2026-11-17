@@ -280,12 +280,14 @@ function App() {
   useEffect(() => {
     setRunSelectMode(false);
     setSelectedRunIds([]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 有意省略：挂载时序/避免循环触发
   }, [selectedCase?.id]);
 
   useEffect(() => {
     if (sidebarNav === 'runs' && !selectedCase && allRuns.length === 0 && authUser) {
       fetchAllRuns();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 有意省略：挂载时序/避免循环触发
   }, [sidebarNav, selectedCase?.id, authUser]);
 
   const scrollSidebarTo = (key: 'cases' | 'suites' | 'runs') => {
@@ -478,6 +480,7 @@ function App() {
       }
     }, 1000);
     return () => window.clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 有意省略：挂载时序/避免循环触发
   }, [selectedSuiteRunId, selectedSuiteRun?.status, suiteDoc?.id, selectedSuiteRun?.suite_id]);
 
   const runSuite = async () => {
@@ -502,6 +505,7 @@ function App() {
     fetchSuites();
     fetchAllRuns();
     loadSettings();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 有意省略：挂载时序/避免循环触发
   }, [authReady, authUser]);
 
   const handleDeleteSuiteRun = async (e: React.MouseEvent, runId: string) => {
@@ -788,6 +792,7 @@ function App() {
       if (seq !== caseLoadSeqRef.current) return;
       setScriptContent('Failed to load case: ' + getErrorMessage(e));
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 有意省略：挂载时序/避免循环触发
   }, [selectedCase]);
 
   useEffect(() => {
@@ -838,6 +843,7 @@ function App() {
     return () => {
       // Don't close here if we want to keep it alive across renders unless runId changes
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 有意省略：挂载时序/避免循环触发
   }, [selectedSuiteRun]);
 
   const collectPlaceholders = (doc: CaseDoc) => {

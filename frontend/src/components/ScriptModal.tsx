@@ -20,37 +20,22 @@ type Props = {
 };
 
 /** 生成脚本大弹窗：占据全屏 90%，代码高亮，独立打开不受左栏宽度限制 */
-export default function ScriptModal(props: Props) {
-  const { open } = props;
+export default function ScriptModal({ open, onClose, ...props }: Props) {
   // Esc 生命周期挂在弹窗级别；内部状态随挂载重置（open 挂载 → 卸载），避免 effect 内 setState
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') props.onClose();
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, props.onClose]);
+  }, [open, onClose]);
 
   if (!open) return null;
-  return <ScriptModalInner {...props} />;
+  return <ScriptModalInner {...props} onClose={onClose} />;
 }
 
-function ScriptModalInner({
-  caseName,
-  scriptContent,
-  loadingScript,
-  source,
-  onClose,
-  onRegenerate,
-  onCopy,
-  copied,
-  onSave,
-  saving,
-  saveError,
-  onResetToGenerated,
-  resetting,
-}: Omit<Props, 'open'>) {
+function ScriptModalInner({ caseName, scriptContent, loadingScript, source, onClose, onRegenerate, onCopy, copied, onSave, saving, saveError, onResetToGenerated, resetting }: Omit<Props, 'open'>) {
   const editable = !!onSave;
   // 挂载时以当前内容为初始草稿（key 由父层控制重挂载）
   const [draft, setDraft] = useState<string>(scriptContent);
