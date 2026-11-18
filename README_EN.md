@@ -13,6 +13,8 @@ Let AI take over fragile CSS selectors and drive E2E tests with natural language
 
 [中文](README.md) · [Quick Start](#quick-start) · [Docs](#docs) · [Verification](#verification)
 
+Deploying with an agent? Use the [English runbook](docs/agent-deploy.en.md) or [中文操作手册](docs/agent-deploy.md).
+
 </div>
 
 ---

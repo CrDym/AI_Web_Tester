@@ -13,6 +13,8 @@
 
 [English](README_EN.md) · [快速开始](#快速开始) · [文档](#文档) · [验证](#验证)
 
+交给 Agent 部署：[中文操作手册](docs/agent-deploy.md) · [English runbook](docs/agent-deploy.en.md)
+
 </div>
 
 ---
