@@ -1,15 +1,22 @@
 {
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
+    "tsBuildInfoFile": "./.test-build/tsconfig.test.tsbuildinfo",
     "noEmit": false,
-    "outDir": "./node_modules/.tmp/tests",
+    "outDir": "./.test-build",
     "rootDir": "./src",
     "module": "ES2022",
     "moduleResolution": "bundler",
     "types": ["node"],
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "verbatimModuleSyntax": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
   },
   "include": [
-    "src/utils/**/*.ts"
-  ]
+    "src/utils/**/*.ts",
+    "src/utils/**/__tests__/**/*.ts",
+    "src/types.ts"
+  ],
+  "exclude": []
 }

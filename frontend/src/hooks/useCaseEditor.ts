@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react';
 import type { CaseDoc, CaseStep } from '../types';
+import {
+  addStepOp,
+  duplicateStepOp,
+  moveStepOp,
+  removeStepOp,
+  toggleDisableStepOp,
+  updateStepOp,
+} from '../utils/caseStepOps';
 
 export function useCaseEditor() {
   const [caseDoc, setCaseDoc] = useState<CaseDoc | null>(null);
@@ -23,40 +31,27 @@ export function useCaseEditor() {
   };
 
   const addStep = () => {
-    if (!caseDoc) return;
-    setCaseDoc({
-      ...caseDoc,
-      steps: [...caseDoc.steps, { type: 'click', selector: '', intent: '', value: '' }],
-    });
+    setCaseDoc((doc) => (doc ? addStepOp(doc) : doc));
   };
 
   const updateStep = (idx: number, patch: Partial<CaseStep>) => {
-    if (!caseDoc) return;
-    const steps = caseDoc.steps.map((step, i) => (i === idx ? { ...step, ...patch } : step));
-    setCaseDoc({ ...caseDoc, steps });
+    setCaseDoc((doc) => (doc ? updateStepOp(doc, idx, patch) : doc));
   };
 
   const removeStep = (idx: number) => {
-    if (!caseDoc) return;
-    setCaseDoc({ ...caseDoc, steps: caseDoc.steps.filter((_, i) => i !== idx) });
+    setCaseDoc((doc) => (doc ? removeStepOp(doc, idx) : doc));
   };
 
   const duplicateStep = (idx: number) => {
-    if (!caseDoc) return;
-    const steps = [...caseDoc.steps];
-    steps.splice(idx + 1, 0, { ...steps[idx] });
-    setCaseDoc({ ...caseDoc, steps });
+    setCaseDoc((doc) => (doc ? duplicateStepOp(doc, idx) : doc));
   };
 
   const moveStep = (idx: number, dir: 'up' | 'down') => {
-    if (!caseDoc) return;
-    const steps = [...caseDoc.steps];
-    if (dir === 'up' && idx > 0) {
-      [steps[idx - 1], steps[idx]] = [steps[idx], steps[idx - 1]];
-    } else if (dir === 'down' && idx < steps.length - 1) {
-      [steps[idx + 1], steps[idx]] = [steps[idx], steps[idx + 1]];
-    }
-    setCaseDoc({ ...caseDoc, steps });
+    setCaseDoc((doc) => (doc ? moveStepOp(doc, idx, dir) : doc));
+  };
+
+  const toggleDisableStep = (idx: number) => {
+    setCaseDoc((doc) => (doc ? toggleDisableStepOp(doc, idx) : doc));
   };
 
   return {
@@ -77,5 +72,6 @@ export function useCaseEditor() {
     removeStep,
     duplicateStep,
     moveStep,
+    toggleDisableStep,
   };
 }
