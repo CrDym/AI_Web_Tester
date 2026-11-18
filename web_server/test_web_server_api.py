@@ -429,6 +429,148 @@ def test_build_python_script_dataset_true_none_compiles(app_client):
     compile(script, "<gen>", "exec")
 
 
+def test_build_python_script_does_not_require_openai_key(app_client, monkeypatch):
+    """回归：无 OPENAI_API_KEY 环境下，生成的回放脚本可真实执行纯 selector 步骤且不构造 AI。
+
+    产品阻塞点修复：原 `_build_python_script` 无条件生成 `agent = AITesterAgent(...)`，
+    其构造 (ChatOpenAI) 校验 OPENAI_API_KEY 非空，导致纯 selector 回放在 page.goto 之前
+    即因 pydantic ValidationError 而失败。修复后 agent/healer 与 OPENAI_API_KEY 同条件构造，
+    纯回放路径不依赖 AI 凭据；仅当真正触发自愈时才需要 AI（此时若未配置则明确失败，不吞错）。
+
+    本测试行为级：monkeypatch 删除 OPENAI_API_KEY，exec 生成脚本，用桩 page/driver 实际调用
+    生成的 test_recorded_flow，断言确定性步骤被执行且 AITesterAgent 从未被构造。
+    隔离存储、不读项目 .env、不伪造凭据。
+    """
+    app_module, _, _ = app_client
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    case = {
+        "name": "replay no-ai",
+        "start_url": "https://example.test",
+        "steps": [
+            {"type": "click", "selector": "#btn1", "intent": "点击登录", "value": ""},
+            {"type": "input", "selector": "#acc", "intent": "输入账号 admin", "value": "admin"},
+        ],
+        "variables": {},
+        "dataset": [],
+    }
+    script = app_module._build_python_script(case)
+
+    # 桩 ai_tester：记录 perform_action 调用，并跟踪 AITesterAgent 是否被构造
+    performed = []
+    ai_constructed = {"count": 0}
+
+    class _StubDriver:
+        def __init__(self, page):
+            self.page = page
+
+        def perform_action(self, action, target_id, value=None):
+            performed.append((action, target_id, value))
+
+        def get_screenshot(self, *a, **k):
+            return ""
+
+        def switch_to_latest_page(self):
+            return self.page
+
+        def _get_locator(self, selector):
+            return self.page.locator(selector)
+
+    class _StubAITesterAgent:
+        def __init__(self, *a, **k):
+            ai_constructed["count"] += 1
+            raise AssertionError("AITesterAgent must not be constructed without OPENAI_API_KEY")
+
+        def get_dom_tree_str(self):
+            return ""
+
+    class _StubSelfHealer:
+        def __init__(self, *a, **k):
+            raise AssertionError("SelfHealer must not be constructed without OPENAI_API_KEY")
+
+    # 桩 pytest / dotenv / page，注入到 exec 的 globals
+    class _StubPage:
+        def __init__(self):
+            self.gotos = []
+            self.timeouts = []
+
+        def goto(self, url, **k):
+            self.gotos.append(url)
+
+        def wait_for_timeout(self, ms):
+            self.timeouts.append(ms)
+
+        def locator(self, selector):
+            class _L:
+                def count(self_):
+                    return 1
+
+                def wait_for(self_, **k):
+                    pass
+
+                def first(self_):
+                    return self_
+
+            return _L()
+
+    import types as _types
+    ai_stub = _types.ModuleType("ai_tester")
+    ai_stub.PlaywrightDriver = _StubDriver
+    ai_stub.AITesterAgent = _StubAITesterAgent
+    ai_stub.SelfHealer = _StubSelfHealer
+    ai_stub.__all__ = ["PlaywrightDriver", "AITesterAgent", "SelfHealer"]
+
+    pytest_stub = _types.ModuleType("pytest")
+    def _parametrize(*a, **k):
+        def deco(fn):
+            return fn
+        return deco
+    pytest_stub.mark = _types.SimpleNamespace(parametrize=_parametrize)
+
+    dotenv_stub = _types.ModuleType("dotenv")
+    dotenv_stub.load_dotenv = lambda *a, **k: False
+
+    # 注册到 sys.modules，使生成脚本中的 `from ai_tester import ...` 解析到桩而非真实包
+    saved_ai = sys.modules.get("ai_tester")
+    saved_pytest = sys.modules.get("pytest")
+    saved_dotenv = sys.modules.get("dotenv")
+    sys.modules["ai_tester"] = ai_stub
+    sys.modules["pytest"] = pytest_stub
+    sys.modules["dotenv"] = dotenv_stub
+    try:
+        sandbox_globals = {
+            "__name__": "gen_replay_no_ai",
+            "ai_tester": ai_stub,
+            "pytest": pytest_stub,
+            "dotenv": dotenv_stub,
+        }
+        # exec 生成的脚本（模块级定义 dataset + test_recorded_flow）
+        exec(compile(script, "<gen>", "exec"), sandbox_globals)
+        test_fn = sandbox_globals["test_recorded_flow"]
+    finally:
+        for name, prev in (("ai_tester", saved_ai), ("pytest", saved_pytest), ("dotenv", saved_dotenv)):
+            if prev is not None:
+                sys.modules[name] = prev
+            else:
+                sys.modules.pop(name, None)
+
+    # 实际调用生成的测试函数：传入桩 page 与 dataset 中第一行（这里为空 dict 合并 runtime_vars）
+    page = _StubPage()
+    dataset = sandbox_globals["dataset"]
+    assert dataset, "dataset should have at least one row"
+    test_fn(page, dataset[0])
+
+    # —— 断言：确定性步骤被执行，AI 从未构造 ——
+    assert ai_constructed["count"] == 0, "AITesterAgent was constructed without OPENAI_API_KEY"
+    # 起始页被访问
+    assert page.gotos == ["https://example.test"], f"unexpected gotos: {page.gotos}"
+    # click + input 两个确定性步骤均通过 perform_action 回放
+    assert performed == [
+        ("click", "SELECTOR:#btn1", ""),
+        ("type", "SELECTOR:#acc", "admin"),
+    ], f"unexpected performed actions: {performed}"
+
+
 def test_backup_restore_preserves_variables_and_group(app_client):
     """备份恢复完整性：恢复后 steps 与 variables 都应回到备份版本。"""
     app_module, client, headers = app_client

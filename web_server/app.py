@@ -812,8 +812,13 @@ def _build_python_script(case: Dict[str, Any]) -> str:
     lines.append("@pytest.mark.parametrize('dataset_row', dataset)")
     lines.append("def test_recorded_flow(page, dataset_row):")
     lines.append("    driver = PlaywrightDriver(page)")
-    lines.append("    agent = AITesterAgent(driver, use_vision=False, auto_vision=True)")
-    lines.append("    healer = SelfHealer(use_vision=True) if os.environ.get('OPENAI_API_KEY') else None")
+    # AI 自愈为可选能力：仅当配置了 OPENAI_API_KEY 时才构造 AITesterAgent / SelfHealer。
+    # 纯 selector 回放路径（click/input/assert/wait/...）不依赖 AI 凭据，
+    # 避免在无 OpenAI key 环境（CI / 内网离线）下因 AITesterAgent 构造校验而提前失败。
+    # agent 仅在自愈分支（healer is not None）中被使用，故与 healer 同条件构造，保证可用性。
+    lines.append("    _ai_enabled = bool(os.environ.get('OPENAI_API_KEY'))")
+    lines.append("    agent = AITesterAgent(driver, use_vision=False, auto_vision=True) if _ai_enabled else None")
+    lines.append("    healer = SelfHealer(use_vision=True) if _ai_enabled else None")
     lines.append("")
     lines.append("    runtime_vars = {")
     lines.append("        'today_ymd': datetime.now().strftime('%y%m%d'),")
